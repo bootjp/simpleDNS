@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net"
 	"os"
@@ -23,24 +22,11 @@ type AnswerCache struct {
 	SolveTime time.Time
 }
 
-func NewDNSCache() DNSCache {
-
-	return DNSCache{
-		//Type: map[layers.DNSType]AnswerCache{},
-	}
-
-}
-
 type DNSCache map[layers.DNSType]AnswerCache
 
-//}
-
 func NewCacheRepository() *CacheRepository {
-	//c := NewDNSCache()
-	//_ = map[layers.DNSType]AnswerCache{}
-	m := map[string]DNSCache{}
 	return &CacheRepository{
-		items: m,
+		items: map[string]DNSCache{},
 		mu:    &sync.RWMutex{},
 	}
 }
@@ -56,7 +42,6 @@ func (c *CacheRepository) Get(name string, t layers.DNSType) (*layers.DNS, error
 	c.mu.RLock()
 	cn, ok := c.items[name]
 	c.mu.RUnlock()
-	fmt.Println(cn[t])
 	if !ok || len(cn[t].Response.Answers) <= 0 {
 		return nil, CacheNotFound
 	}
@@ -101,13 +86,13 @@ func init() {
 
 func main() {
 
-	fmt.Println("Server listening  at localhost:15353")
+	logger.Println("Server listening  at localhost:15353")
 	conn, err := net.ListenPacket("udp", "localhost:15353")
 	if err != nil {
 		logger.Println(err)
 	}
 	defer conn.Close()
-	buffer := make([]byte, 1500)
+	buffer := make([]byte, 512)
 	for {
 		length, addr, err := conn.ReadFrom(buffer)
 		if err != nil {
