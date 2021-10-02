@@ -19,7 +19,7 @@ var cache *CacheRepository
 
 type AnswerCache struct {
 	Response  *layers.DNS
-	SolveTime time.Time
+	TimeToDie int64
 }
 
 type DNSCache map[layers.DNSType]AnswerCache
@@ -46,9 +46,9 @@ func (c *CacheRepository) Get(name string, t layers.DNSType) (*layers.DNS, error
 		return nil, CacheNotFound
 	}
 
-	sub := time.Now().Unix() - cn[t].SolveTime.Unix()
+	expire := time.Now().Unix()-cn[t].TimeToDie > 0
 
-	if sub >= int64(cn[t].Response.Answers[0].TTL) {
+	if expire {
 		logger.Println("stale cache")
 		c.mu.Lock()
 
@@ -165,8 +165,8 @@ func main() {
 		}
 
 		if err := cache.Set(name, layers.DNSTypeA, AnswerCache{
-			SolveTime: time.Now(),
 			Response:  answer,
+			TimeToDie: time.Now().Unix() + int64(answer.Answers[0].TTL),
 		}); err != nil {
 			logger.Println(err)
 			continue
