@@ -5,7 +5,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"sync"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/google/gopacket/layers"
 
@@ -13,18 +16,87 @@ import (
 )
 
 var logger *log.Logger
-var cache map[string]AnswerCache
+var cache *CacheRepository
 
 type AnswerCache struct {
-	Response  layers.DNS
+	Response  *layers.DNS
 	SolveTime time.Time
+}
+
+func NewDNSCache() DNSCache {
+
+	return DNSCache{
+		//Type: map[layers.DNSType]AnswerCache{},
+	}
+
+}
+
+type DNSCache map[layers.DNSType]AnswerCache
+
+//}
+
+func NewCacheRepository() *CacheRepository {
+	//c := NewDNSCache()
+	//_ = map[layers.DNSType]AnswerCache{}
+	m := map[string]DNSCache{}
+	return &CacheRepository{
+		items: m,
+		mu:    &sync.RWMutex{},
+	}
+}
+
+type CacheRepository struct {
+	items map[string]DNSCache
+	mu    *sync.RWMutex
+}
+
+var CacheNotFound = errors.New("cache not found")
+
+func (c *CacheRepository) Get(name string, t layers.DNSType) (*layers.DNS, error) {
+	c.mu.RLock()
+	cn, ok := c.items[name]
+	c.mu.RUnlock()
+	fmt.Println(cn[t])
+	if !ok || len(cn[t].Response.Answers) <= 0 {
+		return nil, CacheNotFound
+	}
+
+	sub := time.Now().Unix() - cn[t].SolveTime.Unix()
+
+	if sub >= int64(cn[t].Response.Answers[0].TTL) {
+		logger.Println("stale cache")
+		c.mu.Lock()
+
+		if len(cache.items[name]) == 1 {
+			delete(cache.items, name)
+		} else {
+			delete(cache.items[name], t)
+		}
+		c.mu.Unlock()
+		logger.Println("purged " + name)
+		return nil, CacheNotFound
+	}
+
+	return cn[t].Response, nil
+}
+
+func (c *CacheRepository) Set(name string, t layers.DNSType, dns AnswerCache) error {
+	c.mu.Lock()
+
+	if _, ok := c.items[name]; !ok {
+		c.items[name] = map[layers.DNSType]AnswerCache{}
+	}
+	c.items[name][t] = dns
+	c.mu.Unlock()
+
+	return nil
 }
 
 func init() {
 	l := log.New(os.Stdout, "[simpleDNS] ", log.LstdFlags|log.Lmicroseconds|log.Lshortfile)
 	logger = l
 
-	cache = map[string]AnswerCache{}
+	cache = NewCacheRepository()
 }
 
 func main() {
@@ -57,34 +129,25 @@ func main() {
 		}
 
 		name := string(dns.Questions[0].Name)
-		cn, ok := cache[name]
-
-		if ok {
-
-			sub := time.Now().Unix() - cn.SolveTime.Unix()
-			fmt.Println("sub", sub, cn.Response.Answers[0].TTL, sub >= int64(cn.Response.Answers[0].TTL))
-			if sub >= int64(cn.Response.Answers[0].TTL) {
-				logger.Println("stale cache")
-				delete(cache, name)
-				logger.Println("purged " + name)
-				goto res
-			}
-			cn.Response.ID = dns.ID
-			logger.Println("use cache")
+		c, err := cache.Get(name, dns.Questions[0].Type)
+		if err == nil {
+			logger.Println("use cache ")
+			c.ID = dns.ID
 			buf := gopacket.NewSerializeBuffer()
 			opts := gopacket.SerializeOptions{FixLengths: true}
-			err = gopacket.SerializeLayers(buf, opts, &cn.Response)
-			if err != nil {
+			if err := gopacket.SerializeLayers(buf, opts, c); err != nil {
 				logger.Println(err)
+				continue
 			}
 
 			if _, err := conn.WriteTo(buf.Bytes(), addr); err != nil {
 				logger.Println(err)
+				continue
 			}
 			continue
 		}
-	res:
 
+		logger.Println(err)
 		logger.Println("request " + dns.Questions[0].Type.String() + " " + string(dns.Questions[0].Name) + " " + dns.Questions[0].Class.String())
 
 		answer := &layers.DNS{
@@ -106,17 +169,23 @@ func main() {
 
 		buf := gopacket.NewSerializeBuffer()
 		opts := gopacket.SerializeOptions{FixLengths: true}
-		err = gopacket.SerializeLayers(buf, opts, answer)
-		if err != nil {
+		if err := gopacket.SerializeLayers(buf, opts, answer); err != nil {
 			logger.Println(err)
+			continue
 		}
 
 		if _, err := conn.WriteTo(buf.Bytes(), addr); err != nil {
 			logger.Println(err)
+			continue
 		}
-		cache[name] = AnswerCache{
+
+		if err := cache.Set(name, layers.DNSTypeA, AnswerCache{
 			SolveTime: time.Now(),
-			Response:  *answer,
+			Response:  answer,
+		}); err != nil {
+			logger.Println(err)
+			continue
 		}
+
 	}
 }
