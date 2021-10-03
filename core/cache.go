@@ -1,13 +1,16 @@
 package core
 
 import (
-	"errors"
+	"fmt"
 	"log"
 	"sync"
-	"time"
+
+	lru "github.com/hashicorp/golang-lru"
 
 	"github.com/google/gopacket/layers"
 )
+
+const FormatCacheKey = "%s:%s"
 
 type AnswerCache struct {
 	Response  *layers.DNS
@@ -16,57 +19,58 @@ type AnswerCache struct {
 
 type DNSCache map[layers.DNSType]AnswerCache
 
-func NewCacheRepository(logger *log.Logger) *Repository {
-	return &Repository{
-		items: map[string]DNSCache{},
-		mu:    &sync.RWMutex{},
-		log:   logger,
+const defaultMaxLength = 50000
+
+func NewCacheRepository(logger *log.Logger) (*Repository, error) {
+	var maxLength = defaultMaxLength
+
+	c, err := lru.New(maxLength)
+	if err != nil {
+		logger.Println(err)
+		return nil, err
 	}
+
+	return &Repository{
+		items:     c,
+		mu:        &sync.RWMutex{},
+		log:       logger,
+		maxLength: maxLength,
+	}, nil
 }
 
 type Repository struct {
-	items map[string]DNSCache
-	mu    *sync.RWMutex
-	log   *log.Logger
+	items     *lru.Cache
+	mu        *sync.RWMutex
+	log       *log.Logger
+	maxLength int
 }
 
-var NotFound = errors.New("core not found")
-
-func (c *Repository) Get(name string, t layers.DNSType) (*layers.DNS, error) {
-	c.mu.RLock()
-	cn, ok := c.items[name]
-	c.mu.RUnlock()
-	if !ok || len(cn[t].Response.Answers) <= 0 {
-		return nil, NotFound
+func (c *Repository) Get(unow int64, name []byte, t layers.DNSType) (*AnswerCache, bool) {
+	key := fmt.Sprintf(FormatCacheKey, name, t.String())
+	v, ok := c.items.Get(key)
+	if !ok {
+		return nil, false
+	}
+	cn, ok := v.(AnswerCache)
+	if !ok {
+		return nil, false
 	}
 
-	expire := time.Now().Unix()-cn[t].TimeToDie > 0
+	if !ok || len(cn.Response.Answers) <= 0 {
+		return nil, false
+	}
+	expire := unow-cn.TimeToDie > 0
 
 	if expire {
 		c.log.Println("stale cache")
-		c.mu.Lock()
-
-		if len(c.items[name]) == 1 {
-			delete(c.items, name)
-		} else {
-			delete(c.items[name], t)
-		}
-		c.mu.Unlock()
-		c.log.Println("purged " + name)
-		return nil, NotFound
+		c.items.Remove(key)
+		return nil, false
 	}
 
-	return cn[t].Response, nil
+	return &cn, true
 }
 
-func (c *Repository) Set(name string, t layers.DNSType, dns AnswerCache) error {
-	c.mu.Lock()
-
-	if _, ok := c.items[name]; !ok {
-		c.items[name] = map[layers.DNSType]AnswerCache{}
-	}
-	c.items[name][t] = dns
-	c.mu.Unlock()
-
+func (c *Repository) Set(name []byte, t layers.DNSType, dns AnswerCache) error {
+	_ = c.items.Add(fmt.Sprintf(FormatCacheKey, name, t.String()), dns)
 	return nil
 }

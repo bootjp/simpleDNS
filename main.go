@@ -12,8 +12,11 @@ func main() {
 }
 
 func run(args []string) int {
-	dns := core.SimpleDNS{
-		Log: log.New(os.Stdout, "[simpleDNS] ", log.LstdFlags|log.Lmicroseconds|log.Lshortfile),
+	logger := log.New(os.Stdout, "[simpleDNS] ", log.LstdFlags|log.Lmicroseconds|log.Lshortfile)
+	dns, err := core.NewSimpleDNSServer(logger)
+	if err != nil {
+		log.Println(err)
+		return 1
 	}
 	return dns.Run()
 }
