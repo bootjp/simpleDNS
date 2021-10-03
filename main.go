@@ -7,13 +7,11 @@ import (
 	"github.com/bootjp/simple_dns/core"
 )
 
-var logger *log.Logger
-
 func main() {
-	os.Exit(_main())
+	os.Exit(run(os.Args[1:]))
 }
 
-func _main() int {
+func run(args []string) int {
 	dns := core.SimpleDNS{
 		Log: log.New(os.Stdout, "[simpleDNS] ", log.LstdFlags|log.Lmicroseconds|log.Lshortfile),
 	}
