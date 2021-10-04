@@ -21,7 +21,7 @@ type DNSCache map[layers.DNSType]AnswerCache
 
 const defaultMaxLength = 50000
 
-func NewCacheRepository(logger *log.Logger) (*Repository, error) {
+func NewCacheRepository(logger *log.Logger) (*CacheRepository, error) {
 	var maxLength = defaultMaxLength
 
 	c, err := lru.New(maxLength)
@@ -30,7 +30,7 @@ func NewCacheRepository(logger *log.Logger) (*Repository, error) {
 		return nil, err
 	}
 
-	return &Repository{
+	return &CacheRepository{
 		items:     c,
 		mu:        &sync.RWMutex{},
 		log:       logger,
@@ -38,14 +38,14 @@ func NewCacheRepository(logger *log.Logger) (*Repository, error) {
 	}, nil
 }
 
-type Repository struct {
+type CacheRepository struct {
 	items     *lru.Cache
 	mu        *sync.RWMutex
 	log       *log.Logger
 	maxLength int
 }
 
-func (c *Repository) Get(unow int64, name []byte, t layers.DNSType) (*AnswerCache, bool) {
+func (c *CacheRepository) Get(unow int64, name []byte, t layers.DNSType) (*AnswerCache, bool) {
 	key := fmt.Sprintf(FormatCacheKey, name, t.String())
 	v, ok := c.items.Get(key)
 	if !ok {
@@ -70,7 +70,7 @@ func (c *Repository) Get(unow int64, name []byte, t layers.DNSType) (*AnswerCach
 	return &cn, true
 }
 
-func (c *Repository) Set(name []byte, t layers.DNSType, dns AnswerCache) error {
+func (c *CacheRepository) Set(name []byte, t layers.DNSType, dns AnswerCache) error {
 	_ = c.items.Add(fmt.Sprintf(FormatCacheKey, name, t.String()), dns)
 	return nil
 }
