@@ -5,13 +5,15 @@ import (
 	"net"
 	"time"
 
+	"github.com/miekg/dns"
+
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
 
 type SimpleDNS struct {
 	log   *log.Logger
-	cache *Repository
+	cache *CacheRepository
 }
 
 func NewSimpleDNSServer(logger *log.Logger) (SimpleDNSServer, error) {
@@ -51,6 +53,33 @@ func (d *SimpleDNS) Run() int {
 	}
 }
 
+func (d *SimpleDNS) resolve(name []byte, t layers.DNSType) (*layers.DNS, error) {
+	m := &dns.Msg{}
+	m.SetQuestion(dns.Fqdn(string(name)), uint16(t))
+
+	c := dns.Client{}
+	r, _, err := c.Exchange(m, "1.1.1.1:53")
+	if err != nil {
+		d.log.Fatalln(err)
+		return nil, err
+	}
+
+	rr, err := r.Pack()
+	if err != nil {
+		d.log.Fatalln(err)
+	}
+
+	res := layers.DNS{}
+
+	err = res.DecodeFromBytes(rr, gopacket.NilDecodeFeedback)
+	if err != nil {
+		d.log.Fatalln(err)
+
+	}
+
+	return &res, nil
+}
+
 func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr, buffer []byte) {
 
 	unow := time.Now().Unix()
@@ -61,19 +90,19 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 		return
 	}
 
-	dns := p.Layer(layers.LayerTypeDNS).(*layers.DNS)
+	dnsReq := p.Layer(layers.LayerTypeDNS).(*layers.DNS)
 
-	if len(dns.Questions) != 1 {
+	if len(dnsReq.Questions) != 1 {
 		d.log.Println("Failed to parse 1 DNS answer")
 		return
 	}
 
-	name := &dns.Questions[0].Name
+	name := &dnsReq.Questions[0].Name
 
-	c, ok := d.cache.Get(unow, *name, dns.Questions[0].Type)
+	c, ok := d.cache.Get(unow, *name, dnsReq.Questions[0].Type)
 	if ok {
 		d.log.Println("use cache")
-		c.Response.ID = dns.ID
+		c.Response.ID = dnsReq.ID
 		for i, _ := range c.Response.Answers {
 			c.Response.Answers[i].TTL = uint32(c.TimeToDie - unow)
 		}
@@ -83,32 +112,24 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 		return
 	}
 
-	d.log.Println("request " + dns.Questions[0].Type.String() + " " + string(dns.Questions[0].Name) + " " + dns.Questions[0].Class.String())
+	d.log.Println("request " + dnsReq.Questions[0].Type.String() + " " + string(dnsReq.Questions[0].Name) + " " + dnsReq.Questions[0].Class.String())
 
-	answer := &layers.DNS{
-		ID:     dns.ID,
-		QR:     true,
-		OpCode: layers.DNSOpCodeQuery,
-		AA:     true,
-		RD:     true,
-		RA:     true,
-	}
-	answer.Answers = append(dns.Answers,
-		layers.DNSResourceRecord{
-			Name:  []byte("bootjp.me"),
-			Type:  layers.DNSTypeA,
-			Class: layers.DNSClassIN,
-			TTL:   10,
-			IP:    net.IPv4(192, 168, 0, 1),
-		})
-
-	if err := d.write(conn, addr, answer); err != nil {
+	dnsRes, err := d.resolve(*name, dnsReq.Questions[0].Type)
+	if err != nil {
 		d.log.Println(err)
+		return
+	}
+
+	dnsRes.ID = dnsReq.ID
+
+	if err := d.write(conn, addr, dnsRes); err != nil {
+		d.log.Println(err)
+		return
 	}
 
 	if err := d.cache.Set(*name, layers.DNSTypeA, AnswerCache{
-		Response:  answer,
-		TimeToDie: unow + int64(answer.Answers[0].TTL),
+		Response:  dnsRes,
+		TimeToDie: unow + int64(dnsRes.Answers[0].TTL),
 	}); err != nil {
 		d.log.Println(err)
 		return
