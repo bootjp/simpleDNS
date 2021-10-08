@@ -172,6 +172,12 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 
 	dnsRes.ID = dnsReq.ID
 
+	if len(dnsRes.Answers) == 0 {
+		d.log.Println("answer is empty")
+		//TODO write empty response
+		return
+	}
+
 	if err := d.write(conn, addr, dnsRes); err != nil {
 		d.log.Println(err)
 		return

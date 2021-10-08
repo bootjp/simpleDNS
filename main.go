@@ -16,8 +16,8 @@ func run(args []string) int {
 	logger := log.New(os.Stdout, "[simpleDNS] ", log.LstdFlags|log.Lmicroseconds|log.Lshortfile)
 	var ips [2]*core.NameServer
 
-	ips[0] = core.NewNameServer(net.IPv4(2, 8, 8, 8), 53)
-	ips[1] = core.NewNameServer(net.IPv4(1, 1, 1, 0), 53)
+	ips[0] = core.NewNameServer(net.ParseIP("8.8.8.8"), 53)
+	ips[1] = core.NewNameServer(net.ParseIP("1.1.1.1"), 53)
 
 	dns, err := core.NewSimpleDNSServer(ips, logger)
 	if err != nil {
