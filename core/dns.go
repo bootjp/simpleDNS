@@ -1,8 +1,10 @@
 package core
 
 import (
+	"errors"
 	"log"
 	"net"
+	"strconv"
 	"time"
 
 	"github.com/miekg/dns"
@@ -11,32 +13,51 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
-type SimpleDNS struct {
-	log   *log.Logger
-	cache *CacheRepository
+func NewNameServer(ip net.IP, port int) *NameServer {
+	return &NameServer{
+		IP:   ip,
+		Port: port,
+	}
 }
 
-func NewSimpleDNSServer(logger *log.Logger) (SimpleDNSServer, error) {
+type NameServer struct {
+	IP   net.IP
+	Port int
+}
+
+func (n *NameServer) String() string {
+	return n.IP.String() + ":" + strconv.Itoa(n.Port)
+}
+
+type SimpleDNS struct {
+	Server [2]*NameServer
+	log    *log.Logger
+	cache  *CacheRepository
+}
+
+func NewSimpleDNSServer(ip [2]*NameServer, logger *log.Logger) (SimpleDNSServer, error) {
 	cr, err := NewCacheRepository(logger)
 	if err != nil {
 		return nil, err
 	}
+
 	return &SimpleDNS{
-		log:   logger,
-		cache: cr,
+		Server: ip,
+		log:    logger,
+		cache:  cr,
 	}, nil
 }
 
 type SimpleDNSServer interface {
-	Run() int
+	Run() error
 }
 
-func (d *SimpleDNS) Run() int {
+func (d *SimpleDNS) Run() error {
 	d.log.Println("Server listening  at localhost:15353")
 
 	conn, err := net.ListenPacket("udp", "localhost:15353")
 	if err != nil {
-		d.log.Println(err)
+		return err
 	}
 	defer func() {
 		_ = conn.Close()
@@ -53,35 +74,64 @@ func (d *SimpleDNS) Run() int {
 	}
 }
 
+var ErrServerUnReached = errors.New("name servers all unreached")
+
 func (d *SimpleDNS) resolve(name []byte, t layers.DNSType) (*layers.DNS, error) {
 	m := &dns.Msg{}
 	m.SetQuestion(dns.Fqdn(string(name)), uint16(t))
 
 	c := dns.Client{}
-	r, _, err := c.Exchange(m, "1.1.1.1:53")
-	if err != nil {
-		d.log.Fatalln(err)
-		return nil, err
+
+	for attempt, server := range d.Server {
+		ch := make(chan *layers.DNS, 1)
+		go func() {
+			r, _, err := c.Exchange(m, server.String())
+			if err != nil {
+				d.log.Println(err)
+				ch <- nil
+				return
+			}
+
+			rr, err := r.Pack()
+			if err != nil {
+				d.log.Println(err)
+				ch <- nil
+				return
+			}
+
+			res := layers.DNS{}
+			err = res.DecodeFromBytes(rr, gopacket.NilDecodeFeedback)
+			if err != nil {
+				d.log.Println(err)
+				ch <- nil
+				return
+			}
+			ch <- &res
+		}()
+
+		select {
+		case m := <-ch:
+			if m != nil {
+				return m, nil
+			}
+
+			continue
+		case <-time.After(1 * time.Second):
+			if attempt > 0 {
+				return nil, ErrServerUnReached
+			}
+			d.log.Println("retry switching secondary name server")
+		}
+
 	}
 
-	rr, err := r.Pack()
-	if err != nil {
-		d.log.Fatalln(err)
-	}
-
-	res := layers.DNS{}
-
-	err = res.DecodeFromBytes(rr, gopacket.NilDecodeFeedback)
-	if err != nil {
-		d.log.Fatalln(err)
-
-	}
-
-	return &res, nil
+	// this is unreached
+	return nil, ErrServerUnReached
 }
 
 func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr, buffer []byte) {
 
+	// reduce syscall using fixed unix timestamp
 	unow := time.Now().Unix()
 
 	p := gopacket.NewPacket(buffer[:length], layers.LayerTypeDNS, gopacket.Default)
@@ -103,7 +153,7 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 	if ok {
 		d.log.Println("use cache")
 		c.Response.ID = dnsReq.ID
-		for i, _ := range c.Response.Answers {
+		for i := range c.Response.Answers {
 			c.Response.Answers[i].TTL = uint32(c.TimeToDie - unow)
 		}
 		if err := d.write(conn, addr, c.Response); err != nil {
