@@ -17,8 +17,6 @@ type AnswerCache struct {
 	TimeToDie int64
 }
 
-type DNSCache map[layers.DNSType]AnswerCache
-
 const defaultMaxLength = 50000
 
 func NewCacheRepository(logger *log.Logger) (*CacheRepository, error) {
@@ -56,11 +54,7 @@ func (c *CacheRepository) Get(unow int64, name []byte, t layers.DNSType) (*Answe
 		return nil, false
 	}
 
-	if !ok || len(cn.Response.Answers) <= 0 {
-		return nil, false
-	}
 	expire := unow-cn.TimeToDie > 0
-
 	if expire {
 		c.log.Println("stale cache")
 		c.items.Remove(key)
