@@ -3,6 +3,7 @@ package core
 import (
 	"errors"
 	"log"
+	"math"
 	"net"
 	"strconv"
 	"time"
@@ -63,7 +64,7 @@ func (d *SimpleDNS) Run() error {
 		_ = conn.Close()
 	}()
 
-	buffer := make([]byte, 512)
+	buffer := make([]byte, 1000)
 	for {
 		length, addr, err := conn.ReadFrom(buffer)
 		if err != nil {
@@ -142,8 +143,8 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 
 	dnsReq := p.Layer(layers.LayerTypeDNS).(*layers.DNS)
 
-	if len(dnsReq.Questions) != 1 {
-		d.log.Println("Failed to parse 1 DNS answer")
+	if len(dnsReq.Questions) == 0 {
+		d.log.Println("dot not have question")
 		return
 	}
 
@@ -172,24 +173,35 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 
 	dnsRes.ID = dnsReq.ID
 
-	if len(dnsRes.Answers) == 0 {
-		d.log.Println("answer is empty")
-		//TODO write empty response
-		return
-	}
-
 	if err := d.write(conn, addr, dnsRes); err != nil {
 		d.log.Println(err)
 		return
 	}
 
+	if len(dnsRes.Answers) == 0 {
+		d.log.Println("answer is empty")
+		return
+	}
+
 	if err := d.cache.Set(*name, layers.DNSTypeA, AnswerCache{
 		Response:  dnsRes,
-		TimeToDie: unow + int64(dnsRes.Answers[0].TTL),
+		TimeToDie: unow + int64(d.minTTL(dnsRes)),
 	}); err != nil {
 		d.log.Println(err)
 		return
 	}
+}
+
+func (d *SimpleDNS) minTTL(dns *layers.DNS) uint32 {
+
+	min := uint32(math.MaxUint32)
+	for _, ans := range dns.Answers {
+		if min > ans.TTL {
+			min = ans.TTL
+		}
+	}
+
+	return min
 }
 
 func (d *SimpleDNS) write(conn net.PacketConn, addr net.Addr, answer *layers.DNS) error {
