@@ -19,7 +19,18 @@ func run(args []string) int {
 	ips[0] = core.NewNameServer(net.ParseIP("8.8.8.8"), 53)
 	ips[1] = core.NewNameServer(net.ParseIP("1.1.1.1"), 53)
 
-	dns, err := core.NewSimpleDNSServer(ips, logger)
+	c := &core.Config{
+
+		NameServer:   ips,
+		MaxCacheSize: 1000,
+		ListenAddr: &net.UDPAddr{
+			IP:   net.ParseIP("0.0.0.0"),
+			Port: 15353,
+			Zone: "",
+		},
+	}
+
+	dns, err := core.NewSimpleDNSServer(c, logger)
 	if err != nil {
 		log.Println(err)
 		return 1

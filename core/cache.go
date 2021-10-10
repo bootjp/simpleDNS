@@ -17,12 +17,8 @@ type AnswerCache struct {
 	TimeToDie int64
 }
 
-const defaultMaxLength = 50000
-
-func NewCacheRepository(logger *log.Logger) (*CacheRepository, error) {
-	var maxLength = defaultMaxLength
-
-	c, err := lru.New(maxLength)
+func NewCacheRepository(size int, logger *log.Logger) (*CacheRepository, error) {
+	c, err := lru.New(size)
 	if err != nil {
 		logger.Println(err)
 		return nil, err
@@ -32,7 +28,7 @@ func NewCacheRepository(logger *log.Logger) (*CacheRepository, error) {
 		items:     c,
 		mu:        &sync.RWMutex{},
 		log:       logger,
-		maxLength: maxLength,
+		maxLength: size,
 	}, nil
 }
 

@@ -5,7 +5,6 @@ import (
 	"log"
 	"math"
 	"net"
-	"strconv"
 	"time"
 
 	"github.com/miekg/dns"
@@ -14,38 +13,24 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
-func NewNameServer(ip net.IP, port int) *NameServer {
-	return &NameServer{
-		IP:   ip,
-		Port: port,
-	}
-}
-
-type NameServer struct {
-	IP   net.IP
-	Port int
-}
-
-func (n *NameServer) String() string {
-	return n.IP.String() + ":" + strconv.Itoa(n.Port)
-}
-
 type SimpleDNS struct {
-	Server [2]*NameServer
-	log    *log.Logger
-	cache  *CacheRepository
+	ListenAddr *net.UDPAddr
+	Server     [2]*NameServer
+	log        *log.Logger
+	cache      *CacheRepository
 }
 
-func NewSimpleDNSServer(ip [2]*NameServer, logger *log.Logger) (SimpleDNSServer, error) {
-	cr, err := NewCacheRepository(logger)
+func NewSimpleDNSServer(c *Config, logger *log.Logger) (SimpleDNSServer, error) {
+	cr, err := NewCacheRepository(c.MaxCacheSize, logger)
 	if err != nil {
 		return nil, err
 	}
 
 	return &SimpleDNS{
-		Server: ip,
-		log:    logger,
-		cache:  cr,
+		ListenAddr: c.ListenAddr,
+		Server:     c.NameServer,
+		log:        logger,
+		cache:      cr,
 	}, nil
 }
 
@@ -54,9 +39,9 @@ type SimpleDNSServer interface {
 }
 
 func (d *SimpleDNS) Run() error {
-	d.log.Println("Server listening  at localhost:15353")
+	d.log.Println("Server listening at 0.0.0.0:15353")
 
-	conn, err := net.ListenPacket("udp", "localhost:15353")
+	conn, err := net.ListenPacket("udp", d.ListenAddr.String())
 	if err != nil {
 		return err
 	}
@@ -183,10 +168,11 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 		return
 	}
 
-	if err := d.cache.Set(*name, layers.DNSTypeA, AnswerCache{
+	err = d.cache.Set(*name, layers.DNSTypeA, AnswerCache{
 		Response:  dnsRes,
 		TimeToDie: unow + int64(d.minTTL(dnsRes)),
-	}); err != nil {
+	})
+	if err != nil {
 		d.log.Println(err)
 		return
 	}
