@@ -195,7 +195,10 @@ func (d *SimpleDNS) write(conn net.PacketConn, addr net.Addr, answer *layers.DNS
 	opts := gopacket.SerializeOptions{FixLengths: true}
 
 	if err := gopacket.SerializeLayers(buf, opts, answer); err != nil {
-		return err
+		res := &layers.DNS{}
+		res.ID = answer.ID
+		d.log.Println(err)
+		_ = gopacket.SerializeLayers(buf, opts, res)
 	}
 
 	if _, err := conn.WriteTo(buf.Bytes(), addr); err != nil {
