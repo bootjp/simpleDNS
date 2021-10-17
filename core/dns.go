@@ -7,10 +7,9 @@ import (
 	"net"
 	"time"
 
-	"github.com/miekg/dns"
+	"golang.org/x/net/dns/dnsmessage"
 
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
+	"github.com/miekg/dns"
 )
 
 type SimpleDNS struct {
@@ -62,14 +61,14 @@ func (d *SimpleDNS) Run() error {
 
 var ErrServerUnReached = errors.New("name servers all unreached")
 
-func (d *SimpleDNS) resolve(name []byte, t layers.DNSType) (*layers.DNS, error) {
+func (d *SimpleDNS) resolve(name *dnsmessage.Name, t *dnsmessage.Type) (*dnsmessage.Message, error) {
 	m := &dns.Msg{}
-	m.SetQuestion(dns.Fqdn(string(name)), uint16(t))
+	m.SetQuestion(name.String(), uint16(*t))
 
 	c := dns.Client{}
 
 	for attempt, server := range d.Server {
-		ch := make(chan *layers.DNS, 1)
+		ch := make(chan *dnsmessage.Message, 1)
 		go func() {
 			r, _, err := c.Exchange(m, server.String())
 			if err != nil {
@@ -85,8 +84,8 @@ func (d *SimpleDNS) resolve(name []byte, t layers.DNSType) (*layers.DNS, error) 
 				return
 			}
 
-			res := layers.DNS{}
-			err = res.DecodeFromBytes(rr, gopacket.NilDecodeFeedback)
+			res := dnsmessage.Message{}
+			err = res.Unpack(rr)
 			if err != nil {
 				d.log.Println(err)
 				ch <- nil
@@ -120,27 +119,37 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 	// reduce syscall using fixed unix timestamp
 	unow := time.Now().Unix()
 
-	p := gopacket.NewPacket(buffer[:length], layers.LayerTypeDNS, gopacket.Default)
-	if p.ErrorLayer() != nil {
-		d.log.Println(p.ErrorLayer().Error())
+	var p dnsmessage.Parser
+	header, err := p.Start(buffer[:length])
+
+	if err != nil {
+		d.log.Println(err)
 		return
 	}
 
-	dnsReq := p.Layer(layers.LayerTypeDNS).(*layers.DNS)
+	var name *dnsmessage.Name
+	var qType *dnsmessage.Type
+	for {
+		q, err := p.Question()
+		if err == dnsmessage.ErrSectionDone {
+			break
+		}
+		if err != nil {
+			log.Println(err)
+			break
+		}
 
-	if len(dnsReq.Questions) == 0 {
-		d.log.Println("dot not have question")
-		return
+		name = &q.Name
+		qType = &q.Type
+		break
 	}
 
-	name := &dnsReq.Questions[0].Name
-
-	c, ok := d.cache.Get(unow, *name, dnsReq.Questions[0].Type)
+	c, ok := d.cache.Get(unow, name, qType)
 	if ok {
 		d.log.Println("use cache")
-		c.Response.ID = dnsReq.ID
+		c.Response.ID = header.ID
 		for i := range c.Response.Answers {
-			c.Response.Answers[i].TTL = uint32(c.TimeToDie - unow)
+			c.Response.Answers[i].Header.TTL = uint32(c.TimeToDie - unow)
 		}
 		if err := d.write(conn, addr, c.Response); err != nil {
 			d.log.Println(err)
@@ -148,15 +157,15 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 		return
 	}
 
-	d.log.Println("request " + dnsReq.Questions[0].Type.String() + " " + string(dnsReq.Questions[0].Name) + " " + dnsReq.Questions[0].Class.String())
+	d.log.Println("request " + qType.String() + " " + name.String())
 
-	dnsRes, err := d.resolve(*name, dnsReq.Questions[0].Type)
+	dnsRes, err := d.resolve(name, qType)
 	if err != nil {
 		d.log.Println(err)
 		return
 	}
 
-	dnsRes.ID = dnsReq.ID
+	dnsRes.ID = header.ID
 
 	if err := d.write(conn, addr, dnsRes); err != nil {
 		d.log.Println(err)
@@ -168,7 +177,7 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 		return
 	}
 
-	err = d.cache.Set(*name, layers.DNSTypeA, AnswerCache{
+	err = d.cache.Set(name, qType, AnswerCache{
 		Response:  dnsRes,
 		TimeToDie: unow + int64(d.minTTL(dnsRes)),
 	})
@@ -178,30 +187,24 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 	}
 }
 
-func (d *SimpleDNS) minTTL(dns *layers.DNS) uint32 {
-
+func (d *SimpleDNS) minTTL(dns *dnsmessage.Message) uint32 {
 	min := uint32(math.MaxUint32)
 	for _, ans := range dns.Answers {
-		if min > ans.TTL {
-			min = ans.TTL
+		if min > ans.Header.TTL {
+			min = ans.Header.TTL
 		}
 	}
 
 	return min
 }
 
-func (d *SimpleDNS) write(conn net.PacketConn, addr net.Addr, answer *layers.DNS) error {
-	buf := gopacket.NewSerializeBuffer()
-	opts := gopacket.SerializeOptions{FixLengths: true}
-
-	if err := gopacket.SerializeLayers(buf, opts, answer); err != nil {
-		res := &layers.DNS{}
-		res.ID = answer.ID
-		d.log.Println(err)
-		_ = gopacket.SerializeLayers(buf, opts, res)
+func (d *SimpleDNS) write(conn net.PacketConn, addr net.Addr, answer *dnsmessage.Message) error {
+	buf, err := answer.Pack()
+	if err != nil {
+		return err
 	}
 
-	if _, err := conn.WriteTo(buf.Bytes(), addr); err != nil {
+	if _, err := conn.WriteTo(buf, addr); err != nil {
 		return err
 	}
 	return nil
