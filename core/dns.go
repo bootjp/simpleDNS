@@ -144,8 +144,8 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 		break
 	}
 
+	// RFC8482 4.3
 	var fallbackAny bool
-
 	if qType != nil && *qType == dnsmessage.TypeALL {
 		*qType = dnsmessage.TypeA
 		fallbackAny = true

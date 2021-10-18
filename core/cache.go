@@ -10,8 +10,6 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 )
 
-const FormatCacheKey = "%s:%s"
-
 type AnswerCache struct {
 	Response  *dnsmessage.Message
 	TimeToDie int64
@@ -39,8 +37,14 @@ type CacheRepository struct {
 	maxLength int
 }
 
+const FormatCacheKey = "%s:%s"
+
+func (c *CacheRepository) key(name *dnsmessage.Name, t *dnsmessage.Type) string {
+	return fmt.Sprintf(FormatCacheKey, name.String(), t.String())
+}
+
 func (c *CacheRepository) Get(unow int64, name *dnsmessage.Name, t *dnsmessage.Type) (*AnswerCache, bool) {
-	key := fmt.Sprintf(FormatCacheKey, name.String(), t.String())
+	key := c.key(name, t)
 	v, ok := c.items.Get(key)
 	if !ok {
 		return nil, false
@@ -52,7 +56,7 @@ func (c *CacheRepository) Get(unow int64, name *dnsmessage.Name, t *dnsmessage.T
 
 	expire := unow-cn.TimeToDie > 0
 	if expire {
-		c.log.Println("stale cache")
+		c.log.Println("stale cache purged")
 		c.items.Remove(key)
 		return nil, false
 	}
@@ -61,6 +65,6 @@ func (c *CacheRepository) Get(unow int64, name *dnsmessage.Name, t *dnsmessage.T
 }
 
 func (c *CacheRepository) Set(name *dnsmessage.Name, t *dnsmessage.Type, dns AnswerCache) error {
-	_ = c.items.Add(fmt.Sprintf(FormatCacheKey, name.String(), t.String()), dns)
+	_ = c.items.Add(c.key(name, t), dns)
 	return nil
 }
