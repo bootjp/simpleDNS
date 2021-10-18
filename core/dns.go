@@ -144,6 +144,13 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 		break
 	}
 
+	var fallbackAny bool
+
+	if qType != nil && *qType == dnsmessage.TypeALL {
+		*qType = dnsmessage.TypeA
+		fallbackAny = true
+	}
+
 	c, ok := d.cache.Get(unow, name, qType)
 	if ok {
 		d.log.Println("use cache")
@@ -166,6 +173,12 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 	}
 
 	dnsRes.ID = header.ID
+
+	if fallbackAny {
+		for i := range dnsRes.Questions {
+			dnsRes.Questions[i].Type = dnsmessage.TypeALL
+		}
+	}
 
 	if err := d.write(conn, addr, dnsRes); err != nil {
 		d.log.Println(err)
