@@ -56,7 +56,7 @@ func (c *CacheRepository) Get(unow int64, name *dnsmessage.Name, t *dnsmessage.T
 
 	expire := unow-cn.TimeToDie > 0
 	if expire {
-		c.log.Println("stale cache purged")
+		c.log.Println("purge cache " + t.String() + " " + name.String())
 		c.items.Remove(key)
 		return nil, false
 	}

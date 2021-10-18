@@ -38,7 +38,7 @@ type SimpleDNSServer interface {
 }
 
 func (d *SimpleDNS) Run() error {
-	d.log.Println("Server listening at 0.0.0.0:15353")
+	d.log.Println("Server listening at " + d.ListenAddr.String())
 
 	conn, err := net.ListenPacket("udp", d.ListenAddr.String())
 	if err != nil {
@@ -144,16 +144,25 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 		break
 	}
 
+	// validate invalid query
+	if name == nil || qType == nil {
+		m := &dnsmessage.Message{}
+		m.ID = header.ID
+
+		d.write(conn, addr, m)
+		return
+	}
+
 	// RFC8482 4.3
 	var fallbackAny bool
-	if qType != nil && *qType == dnsmessage.TypeALL {
+	if *qType == dnsmessage.TypeALL {
 		*qType = dnsmessage.TypeA
 		fallbackAny = true
 	}
 
 	c, ok := d.cache.Get(unow, name, qType)
 	if ok {
-		d.log.Println("use cache")
+		d.log.Println("use cache " + qType.String() + " " + name.String())
 		c.Response.ID = header.ID
 		for i := range c.Response.Answers {
 			c.Response.Answers[i].Header.TTL = uint32(c.TimeToDie - unow)
@@ -186,7 +195,7 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 	}
 
 	if len(dnsRes.Answers) == 0 {
-		d.log.Println("answer is empty")
+		d.log.Println("answer is empty" + qType.String() + " " + name.String())
 		return
 	}
 
