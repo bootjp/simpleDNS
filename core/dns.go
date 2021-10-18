@@ -195,7 +195,7 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 	}
 
 	if len(dnsRes.Answers) == 0 {
-		d.log.Println("answer is empty" + qType.String() + " " + name.String())
+		d.log.Println("answer is empty " + qType.String() + " " + name.String())
 		return
 	}
 
