@@ -6,12 +6,32 @@ import (
 )
 
 type Host string
+type LogLevel int8
+
+const (
+	LoglevelDebug LogLevel = iota - 1
+	LogLevelInfo  LogLevel = 0
+	LogLevelError LogLevel = 5
+)
 
 type Config struct {
 	ListenAddr   *net.UDPAddr
 	MaxCacheSize int
 	NameServer   [2]*NameServer
 	Hosts        []*Host
+	LogLevel     LogLevel
+}
+
+func NewDefaultConfig(s [2]*NameServer) *Config {
+	return &Config{
+		NameServer:   s,
+		MaxCacheSize: 1000,
+		ListenAddr: &net.UDPAddr{
+			IP:   net.ParseIP("0.0.0.0"),
+			Port: 53,
+		},
+		LogLevel: LogLevelInfo,
+	}
 }
 
 func (c *Config) IsValid() bool {

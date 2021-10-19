@@ -2,8 +2,9 @@ package core
 
 import (
 	"fmt"
-	"log"
 	"sync"
+
+	"go.uber.org/zap"
 
 	"golang.org/x/net/dns/dnsmessage"
 
@@ -15,10 +16,23 @@ type AnswerCache struct {
 	TimeToDie int64
 }
 
-func NewCacheRepository(size int, logger *log.Logger) (*CacheRepository, error) {
-	c, err := lru.New(size)
+var _logger *zap.Logger
+
+var eviction = func(key interface{}, value interface{}) {
+
+	go func() {
+		k := key.(string)
+
+		_logger.Info("eviction", zap.String("key", k))
+	}()
+}
+
+func NewCacheRepository(size int, logger *zap.Logger) (*CacheRepository, error) {
+	_logger = logger
+
+	c, err := lru.NewWithEvict(size, eviction)
 	if err != nil {
-		logger.Println(err)
+		logger.Info("failed create lru cache", zap.Error(err))
 		return nil, err
 	}
 
@@ -33,7 +47,7 @@ func NewCacheRepository(size int, logger *log.Logger) (*CacheRepository, error) 
 type CacheRepository struct {
 	items     *lru.Cache
 	mu        *sync.RWMutex
-	log       *log.Logger
+	log       *zap.Logger
 	maxLength int
 }
 
@@ -56,7 +70,10 @@ func (c *CacheRepository) Get(unow int64, name *dnsmessage.Name, t *dnsmessage.T
 
 	expire := unow-cn.TimeToDie > 0
 	if expire {
-		c.log.Println("purge cache " + t.String() + " " + name.String())
+		c.log.Info("purge cache",
+			zap.String("type", t.String()),
+			zap.String("name", name.String()),
+		)
 		c.items.Remove(key)
 		return nil, false
 	}

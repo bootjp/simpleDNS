@@ -7,6 +7,8 @@ import (
 	"net"
 	"time"
 
+	"go.uber.org/zap"
+
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/miekg/dns"
@@ -15,11 +17,11 @@ import (
 type SimpleDNS struct {
 	ListenAddr *net.UDPAddr
 	Server     [2]*NameServer
-	log        *log.Logger
+	log        *zap.Logger
 	cache      *CacheRepository
 }
 
-func NewSimpleDNSServer(c *Config, logger *log.Logger) (SimpleDNSServer, error) {
+func NewSimpleDNSServer(c *Config, logger *zap.Logger) (SimpleDNSServer, error) {
 	cr, err := NewCacheRepository(c.MaxCacheSize, logger)
 	if err != nil {
 		return nil, err
@@ -38,7 +40,7 @@ type SimpleDNSServer interface {
 }
 
 func (d *SimpleDNS) Run() error {
-	d.log.Println("Server listening at " + d.ListenAddr.String())
+	d.log.Info("Server listening at " + d.ListenAddr.String())
 
 	conn, err := net.ListenPacket("udp", d.ListenAddr.String())
 	if err != nil {
@@ -48,11 +50,11 @@ func (d *SimpleDNS) Run() error {
 		_ = conn.Close()
 	}()
 
-	buffer := make([]byte, 1000)
+	buffer := make([]byte, 576)
 	for {
 		length, addr, err := conn.ReadFrom(buffer)
 		if err != nil {
-			d.log.Println(err)
+			d.log.Error(err.Error())
 			continue
 		}
 		d.handleRequest(conn, length, addr, buffer)
@@ -67,19 +69,20 @@ func (d *SimpleDNS) resolve(name *dnsmessage.Name, t *dnsmessage.Type) (*dnsmess
 
 	c := dns.Client{}
 
+	// TODO: refactor retry logic
 	for attempt, server := range d.Server {
 		ch := make(chan *dnsmessage.Message, 1)
 		go func() {
 			r, _, err := c.Exchange(m, server.String())
 			if err != nil {
-				d.log.Println(err)
+				d.log.Warn(err.Error())
 				ch <- nil
 				return
 			}
 
 			rr, err := r.Pack()
 			if err != nil {
-				d.log.Println(err)
+				d.log.Warn(err.Error())
 				ch <- nil
 				return
 			}
@@ -87,7 +90,7 @@ func (d *SimpleDNS) resolve(name *dnsmessage.Name, t *dnsmessage.Type) (*dnsmess
 			res := dnsmessage.Message{}
 			err = res.Unpack(rr)
 			if err != nil {
-				d.log.Println(err)
+				d.log.Warn(err.Error())
 				ch <- nil
 				return
 			}
@@ -105,7 +108,7 @@ func (d *SimpleDNS) resolve(name *dnsmessage.Name, t *dnsmessage.Type) (*dnsmess
 			if attempt > 0 {
 				return nil, ErrServerUnReached
 			}
-			d.log.Println("retry switching secondary name server")
+			d.log.Warn("retry switching secondary name server")
 		}
 
 	}
@@ -123,7 +126,7 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 	header, err := p.Start(buffer[:length])
 
 	if err != nil {
-		d.log.Println(err)
+		d.log.Warn(err.Error())
 		return
 	}
 
@@ -149,7 +152,7 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 		m := &dnsmessage.Message{}
 		m.ID = header.ID
 
-		d.write(conn, addr, m)
+		_ = d.write(conn, addr, m)
 		return
 	}
 
@@ -162,22 +165,28 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 
 	c, ok := d.cache.Get(unow, name, qType)
 	if ok {
-		d.log.Println("use cache " + qType.String() + " " + name.String())
+		d.log.Info("use cache",
+			zap.String("type", qType.String()),
+			zap.String("name", name.String()),
+		)
+
 		c.Response.ID = header.ID
 		for i := range c.Response.Answers {
 			c.Response.Answers[i].Header.TTL = uint32(c.TimeToDie - unow)
 		}
 		if err := d.write(conn, addr, c.Response); err != nil {
-			d.log.Println(err)
+			d.log.Warn(err.Error())
 		}
 		return
 	}
 
-	d.log.Println("request " + qType.String() + " " + name.String())
-
+	d.log.Info("request",
+		zap.String("type", qType.String()),
+		zap.String("name", name.String()),
+	)
 	dnsRes, err := d.resolve(name, qType)
 	if err != nil {
-		d.log.Println(err)
+		d.log.Error(err.Error())
 		return
 	}
 
@@ -190,12 +199,15 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 	}
 
 	if err := d.write(conn, addr, dnsRes); err != nil {
-		d.log.Println(err)
+		d.log.Info(err.Error())
 		return
 	}
 
 	if len(dnsRes.Answers) == 0 {
-		d.log.Println("answer is empty " + qType.String() + " " + name.String())
+		d.log.Info("answer is empty",
+			zap.String("type", qType.String()),
+			zap.String("name", name.String()),
+		)
 		return
 	}
 
@@ -204,7 +216,7 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 		TimeToDie: unow + int64(d.minTTL(dnsRes)),
 	})
 	if err != nil {
-		d.log.Println(err)
+		d.log.Warn(err.Error())
 		return
 	}
 }
