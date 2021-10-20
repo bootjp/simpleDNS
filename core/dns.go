@@ -9,6 +9,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/jaytaylor/go-hostsfile"
+
 	"golang.org/x/net/dns/dnsmessage"
 
 	"github.com/miekg/dns"
@@ -19,6 +21,8 @@ type SimpleDNS struct {
 	Server     [2]*NameServer
 	log        *zap.Logger
 	cache      *CacheRepository
+	Config     *Config
+	Hosts      map[string][]string
 }
 
 func NewSimpleDNSServer(c *Config, logger *zap.Logger) (SimpleDNSServer, error) {
@@ -32,6 +36,8 @@ func NewSimpleDNSServer(c *Config, logger *zap.Logger) (SimpleDNSServer, error) 
 		Server:     c.NameServer,
 		log:        logger,
 		cache:      cr,
+		Config:     c,
+		Hosts:      map[string][]string{},
 	}, nil
 }
 
@@ -40,6 +46,19 @@ type SimpleDNSServer interface {
 }
 
 func (d *SimpleDNS) Run() error {
+	if d.Config.UseHosts {
+		hostsMap, err := hostsfile.ParseHosts(hostsfile.ReadHostsFile())
+		if err != nil {
+			return err
+		}
+
+		for s, strings := range hostsMap {
+			for _, s2 := range strings {
+				d.Hosts[s2] = []string{s}
+			}
+		}
+	}
+
 	d.log.Info("Server listening at " + d.ListenAddr.String())
 
 	conn, err := net.ListenPacket("udp", d.ListenAddr.String())
@@ -147,6 +166,7 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 		break
 	}
 
+	// todo move resolve
 	// validate invalid query
 	if name == nil || qType == nil {
 		m := &dnsmessage.Message{}
@@ -161,6 +181,38 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 	if *qType == dnsmessage.TypeALL {
 		*qType = dnsmessage.TypeA
 		fallbackAny = true
+	}
+
+	if hosts, ok := d.Hosts[name.String()[:(len(name.String())-1)]]; ok {
+		msg := &dnsmessage.Message{
+			Header: dnsmessage.Header{Response: true, Authoritative: true, RCode: dnsmessage.RCodeSuccess},
+		}
+
+		for _, host := range hosts {
+			h, err := dnsmessage.NewName(name.String())
+			if err != nil {
+				d.log.Warn("cant create host struct", zap.String("host", host), zap.Error(err))
+				return
+			}
+
+			b := &dnsmessage.AResource{}
+			copy(b.A[:], host)
+			msg.Answers = append(msg.Answers, dnsmessage.Resource{
+				Header: dnsmessage.ResourceHeader{
+					Name:  h,
+					Type:  dnsmessage.TypeA,
+					Class: dnsmessage.ClassINET,
+				},
+				Body: b,
+			})
+		}
+
+		msg.ID = header.ID
+		if err := d.write(conn, addr, msg); err != nil {
+			d.log.Error("failed write packet", zap.Error(err))
+		}
+
+		return
 	}
 
 	c, ok := d.cache.Get(unow, name, qType)

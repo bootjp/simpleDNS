@@ -20,6 +20,7 @@ type Config struct {
 	NameServer   [2]*NameServer
 	Hosts        []*Host
 	LogLevel     LogLevel
+	UseHosts     bool
 }
 
 func NewDefaultConfig(s [2]*NameServer) *Config {
@@ -31,6 +32,7 @@ func NewDefaultConfig(s [2]*NameServer) *Config {
 			Port: 53,
 		},
 		LogLevel: LogLevelInfo,
+		UseHosts: true,
 	}
 }
 
