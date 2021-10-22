@@ -15,12 +15,12 @@ const (
 )
 
 type Config struct {
-	ListenAddr   *net.UDPAddr
-	MaxCacheSize int
-	NameServer   [2]*NameServer
-	Hosts        []*Host
-	LogLevel     LogLevel
-	UseHosts     bool
+	ListenAddr   *net.UDPAddr   `yaml:"listen_addr"`
+	MaxCacheSize int            `yaml:"max_cache_size"`
+	NameServer   [2]*NameServer `yaml:"name_server"`
+	Hosts        []*Host        `yaml:"hosts"`
+	LogLevel     LogLevel       `yaml:"log_level"`
+	UseHosts     bool           `yaml:"use_hosts"`
 }
 
 func NewDefaultConfig(s [2]*NameServer) *Config {
