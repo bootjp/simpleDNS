@@ -45,6 +45,8 @@ type SimpleDNSServer interface {
 	Run() error
 }
 
+const DnsUdpMaxPacketSize = 576
+
 func (d *SimpleDNS) Run() error {
 	if d.Config.UseHosts {
 		hostsMap, err := hostsfile.ParseHosts(hostsfile.ReadHostsFile())
@@ -54,7 +56,7 @@ func (d *SimpleDNS) Run() error {
 
 		for s, strings := range hostsMap {
 			for _, s2 := range strings {
-				d.Hosts[s2] = []string{s}
+				d.Hosts[s2] = append(d.Hosts[s2], s)
 			}
 		}
 	}
@@ -69,14 +71,14 @@ func (d *SimpleDNS) Run() error {
 		_ = conn.Close()
 	}()
 
-	buffer := make([]byte, 576)
+	buffer := make([]byte, DnsUdpMaxPacketSize)
 	for {
 		length, addr, err := conn.ReadFrom(buffer)
 		if err != nil {
 			d.log.Error(err.Error())
 			continue
 		}
-		d.handleRequest(conn, length, addr, buffer)
+		go d.handleRequest(conn, length, addr, buffer)
 	}
 }
 
@@ -127,7 +129,7 @@ func (d *SimpleDNS) resolve(name *dnsmessage.Name, t *dnsmessage.Type) (*dnsmess
 			if attempt > 0 {
 				return nil, ErrServerUnReached
 			}
-			d.log.Warn("retry switching secondary name server")
+			d.log.Error("retry switching secondary name server")
 		}
 
 	}
@@ -227,15 +229,16 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 			c.Response.Answers[i].Header.TTL = uint32(c.TimeToDie - unow)
 		}
 		if err := d.write(conn, addr, c.Response); err != nil {
-			d.log.Warn(err.Error())
+			d.log.Error(err.Error())
 		}
 		return
 	}
 
-	d.log.Info("request",
+	go d.log.Info("request",
 		zap.String("type", qType.String()),
 		zap.String("name", name.String()),
 	)
+
 	dnsRes, err := d.resolve(name, qType)
 	if err != nil {
 		d.log.Error(err.Error())
@@ -251,12 +254,12 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 	}
 
 	if err := d.write(conn, addr, dnsRes); err != nil {
-		d.log.Info(err.Error())
+		d.log.Error(err.Error())
 		return
 	}
 
 	if len(dnsRes.Answers) == 0 {
-		d.log.Info("answer is empty",
+		d.log.Warn("answer is empty",
 			zap.String("type", qType.String()),
 			zap.String("name", name.String()),
 		)

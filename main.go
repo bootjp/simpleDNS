@@ -20,22 +20,22 @@ func run(args []string) int {
 	logger, _ := lc.Build()
 	logger.Core()
 
+	defer func(logger *zap.Logger) {
+		_ = logger.Sync()
+	}(logger)
+
 	b, err := ioutil.ReadFile("config.yaml")
 	if err != nil {
 		logger.Error("failed to load config", zap.Error(err))
-		os.Exit(1)
+		return 1
 	}
 
 	var c core.Config
 	err = yaml.Unmarshal(b, &c)
 	if err != nil {
 		logger.Error("failed parse yaml", zap.Error(err))
-		os.Exit(1)
+		return 1
 	}
-
-	defer func(logger *zap.Logger) {
-		_ = logger.Sync()
-	}(logger)
 
 	dns, err := core.NewSimpleDNSServer(&c, logger)
 	if err != nil {

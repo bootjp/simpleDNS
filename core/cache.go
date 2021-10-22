@@ -16,19 +16,11 @@ type AnswerCache struct {
 	TimeToDie int64
 }
 
-var _logger *zap.Logger
-
-var eviction = func(key interface{}, value interface{}) {
-
-	go func() {
-		k := key.(string)
-
-		_logger.Info("eviction", zap.String("key", k))
-	}()
-}
-
 func NewCacheRepository(size int, logger *zap.Logger) (*CacheRepository, error) {
-	_logger = logger
+	var eviction = func(key interface{}, value interface{}) {
+		k := key.(string)
+		go logger.Info("eviction", zap.String("key", k))
+	}
 
 	c, err := lru.NewWithEvict(size, eviction)
 	if err != nil {
@@ -70,7 +62,7 @@ func (c *CacheRepository) Get(unow int64, name *dnsmessage.Name, t *dnsmessage.T
 
 	expire := unow-cn.TimeToDie > 0
 	if expire {
-		c.log.Info("purge cache",
+		go c.log.Info("purge cache",
 			zap.String("type", t.String()),
 			zap.String("name", name.String()),
 		)
