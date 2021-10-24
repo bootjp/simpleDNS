@@ -1,8 +1,12 @@
 package core
 
 import (
+	"io/ioutil"
 	"net"
+	"os"
 	"strconv"
+
+	"gopkg.in/yaml.v2"
 )
 
 type Host string
@@ -21,6 +25,35 @@ type Config struct {
 	Hosts        []*Host        `yaml:"hosts"`
 	LogLevel     LogLevel       `yaml:"log_level"`
 	UseHosts     bool           `yaml:"use_hosts"`
+}
+
+func LoadConfig(file ...*os.File) (*Config, error) {
+	var openFile *os.File
+	if file == nil {
+		f, err := os.Open("config.yaml")
+		if err != nil {
+			return nil, err
+		}
+		openFile = f
+	}
+
+	return ParseConfigByFile(openFile)
+}
+
+func ParseConfigByFile(file *os.File) (*Config, error) {
+
+	b, err := ioutil.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+
+	c := Config{}
+	err = yaml.Unmarshal(b, &c)
+	if err != nil {
+		return nil, err
+	}
+
+	return &c, err
 }
 
 func NewDefaultConfig(s [2]*NameServer) *Config {

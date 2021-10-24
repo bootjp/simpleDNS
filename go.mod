@@ -8,7 +8,7 @@ require (
 	github.com/miekg/dns v1.1.43
 	go.uber.org/zap v1.19.1
 	golang.org/x/net v0.0.0-20211015210444-4f30a5c0130f
-	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
+	gopkg.in/yaml.v2 v2.2.8
 )
 
 require (

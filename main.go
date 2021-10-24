@@ -1,11 +1,8 @@
 package main
 
 import (
-	"io/ioutil"
 	"log"
 	"os"
-
-	"gopkg.in/yaml.v3"
 
 	"github.com/bootjp/simple_dns/core"
 	"go.uber.org/zap"
@@ -16,28 +13,14 @@ func main() {
 }
 
 func run(args []string) int {
-	lc := zap.NewProductionConfig()
-	logger, _ := lc.Build()
-	logger.Core()
 
-	defer func(logger *zap.Logger) {
-		_ = logger.Sync()
-	}(logger)
-
-	b, err := ioutil.ReadFile("config.yaml")
+	c, err := core.LoadConfig()
 	if err != nil {
-		logger.Error("failed to load config", zap.Error(err))
+		log.Println("failed load config", zap.Error(err))
 		return 1
 	}
 
-	var c core.Config
-	err = yaml.Unmarshal(b, &c)
-	if err != nil {
-		logger.Error("failed parse yaml", zap.Error(err))
-		return 1
-	}
-
-	dns, err := core.NewSimpleDNSServer(&c, logger)
+	dns, err := core.NewSimpleDNSServer(c)
 	if err != nil {
 		log.Println(err)
 		return 1

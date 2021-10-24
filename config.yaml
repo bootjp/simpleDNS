@@ -1,6 +1,6 @@
 listen_addr:
   ip: 0.0.0.0
-  port: 53
+  port: 15353
   zone: ""
 max_cache_size: 1000
 name_server:
@@ -8,6 +8,5 @@ name_server:
     port: 53
   - ip: 1.1.1.1
     port: 53
-hosts: []
-log_level: 4
+log_level: 0
 use_hosts: true

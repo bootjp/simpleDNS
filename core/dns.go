@@ -2,10 +2,11 @@ package core
 
 import (
 	"errors"
-	"log"
 	"math"
 	"net"
 	"time"
+
+	"go.uber.org/zap/zapcore"
 
 	"go.uber.org/zap"
 
@@ -25,7 +26,14 @@ type SimpleDNS struct {
 	Hosts      map[string][]string
 }
 
-func NewSimpleDNSServer(c *Config, logger *zap.Logger) (SimpleDNSServer, error) {
+func NewSimpleDNSServer(c *Config) (SimpleDNSServer, error) {
+	lc := zap.NewProductionConfig()
+	lc.Level = zap.NewAtomicLevelAt(zapcore.Level(c.LogLevel))
+	lc.Sampling = nil
+	lc.DisableCaller = true
+	logger, _ := lc.Build()
+	logger.Core()
+
 	cr, err := NewCacheRepository(c.MaxCacheSize, logger)
 	if err != nil {
 		return nil, err
@@ -55,8 +63,8 @@ func (d *SimpleDNS) Run() error {
 		}
 
 		for s, strings := range hostsMap {
-			for _, s2 := range strings {
-				d.Hosts[s2] = append(d.Hosts[s2], s)
+			for _, hostname := range strings {
+				d.Hosts[hostname] = append(d.Hosts[hostname], s)
 			}
 		}
 	}
@@ -69,6 +77,7 @@ func (d *SimpleDNS) Run() error {
 	}
 	defer func() {
 		_ = conn.Close()
+		_ = d.log.Sync()
 	}()
 
 	buffer := make([]byte, DnsUdpMaxPacketSize)
@@ -159,7 +168,7 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 			break
 		}
 		if err != nil {
-			log.Println(err)
+			d.log.Error("failed decode packet", zap.Error(err))
 			break
 		}
 
@@ -219,7 +228,7 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 
 	c, ok := d.cache.Get(unow, name, qType)
 	if ok {
-		d.log.Info("use cache",
+		go d.log.Info("use cache",
 			zap.String("type", qType.String()),
 			zap.String("name", name.String()),
 		)
@@ -259,7 +268,7 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 	}
 
 	if len(dnsRes.Answers) == 0 {
-		d.log.Warn("answer is empty",
+		go d.log.Warn("answer is empty",
 			zap.String("type", qType.String()),
 			zap.String("name", name.String()),
 		)
