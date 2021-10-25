@@ -23,7 +23,7 @@ type SimpleDNS struct {
 	log        *zap.Logger
 	cache      *CacheRepository
 	Config     *Config
-	Hosts      map[string][]string
+	staticHost map[string][]dnsmessage.Resource
 }
 
 func NewSimpleDNSServer(c *Config) (SimpleDNSServer, error) {
@@ -45,7 +45,7 @@ func NewSimpleDNSServer(c *Config) (SimpleDNSServer, error) {
 		log:        logger,
 		cache:      cr,
 		Config:     c,
-		Hosts:      map[string][]string{},
+		staticHost: map[string][]dnsmessage.Resource{},
 	}, nil
 }
 
@@ -64,7 +64,25 @@ func (d *SimpleDNS) Run() error {
 
 		for s, strings := range hostsMap {
 			for _, hostname := range strings {
-				d.Hosts[hostname] = append(d.Hosts[hostname], s)
+
+				b := &dnsmessage.AResource{}
+				copy(b.A[:], s)
+
+				h, err := dnsmessage.NewName(hostname + ".")
+				if err != nil {
+					d.log.Error("failed create hosts record", zap.Error(err))
+				}
+
+				ans := dnsmessage.Resource{
+					Header: dnsmessage.ResourceHeader{
+						Name:  h,
+						Type:  dnsmessage.TypeA,
+						Class: dnsmessage.ClassINET,
+					},
+					Body: b,
+				}
+
+				d.staticHost[hostname] = append(d.staticHost[hostname], ans)
 			}
 		}
 	}
@@ -94,6 +112,46 @@ func (d *SimpleDNS) Run() error {
 var ErrServerUnReached = errors.New("name servers all unreached")
 
 func (d *SimpleDNS) resolve(name *dnsmessage.Name, t *dnsmessage.Type) (*dnsmessage.Message, error) {
+
+	// RFC8482 4.3
+	var fallbackAny bool
+	if *t == dnsmessage.TypeALL {
+		*t = dnsmessage.TypeA
+		fallbackAny = true
+	}
+
+	if hosts, ok := d.staticHost[name.String()[:(len(name.String())-1)]]; ok {
+		msg := &dnsmessage.Message{
+			Header: dnsmessage.Header{
+				Response:      true,
+				Authoritative: true,
+				RCode:         dnsmessage.RCodeSuccess,
+			},
+		}
+
+		msg.Answers = hosts
+
+		return msg, nil
+	}
+
+	unow := time.Now().Unix()
+	if c, ok := d.cache.Get(unow, name, t); ok {
+		go d.log.Info("use cache",
+			zap.String("type", t.String()),
+			zap.String("name", name.String()),
+		)
+
+		for i := range c.Response.Answers {
+			c.Response.Answers[i].Header.TTL = uint32(c.TimeToDie - unow)
+		}
+		return c.Response, nil
+	}
+
+	go d.log.Info("request",
+		zap.String("type", t.String()),
+		zap.String("name", name.String()),
+	)
+
 	m := &dns.Msg{}
 	m.SetQuestion(name.String(), uint16(*t))
 
@@ -130,6 +188,19 @@ func (d *SimpleDNS) resolve(name *dnsmessage.Name, t *dnsmessage.Type) (*dnsmess
 		select {
 		case m := <-ch:
 			if m != nil {
+				if fallbackAny {
+					for i := range m.Questions {
+						m.Questions[i].Type = dnsmessage.TypeALL
+					}
+				}
+				err := d.cache.Set(name, t, AnswerCache{
+					Response:  m,
+					TimeToDie: unow + int64(d.minTTL(m)),
+				})
+				if err != nil {
+					d.log.Warn(err.Error())
+				}
+
 				return m, nil
 			}
 
@@ -149,14 +220,11 @@ func (d *SimpleDNS) resolve(name *dnsmessage.Name, t *dnsmessage.Type) (*dnsmess
 
 func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr, buffer []byte) {
 
-	// reduce syscall using fixed unix timestamp
-	unow := time.Now().Unix()
-
 	var p dnsmessage.Parser
 	header, err := p.Start(buffer[:length])
 
 	if err != nil {
-		d.log.Warn(err.Error())
+		d.log.Error("failed decode packet", zap.Error(err), zap.Binary("raw", buffer))
 		return
 	}
 
@@ -187,67 +255,6 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 		return
 	}
 
-	// RFC8482 4.3
-	var fallbackAny bool
-	if *qType == dnsmessage.TypeALL {
-		*qType = dnsmessage.TypeA
-		fallbackAny = true
-	}
-
-	if hosts, ok := d.Hosts[name.String()[:(len(name.String())-1)]]; ok {
-		msg := &dnsmessage.Message{
-			Header: dnsmessage.Header{Response: true, Authoritative: true, RCode: dnsmessage.RCodeSuccess},
-		}
-
-		for _, host := range hosts {
-			h, err := dnsmessage.NewName(name.String())
-			if err != nil {
-				d.log.Warn("cant create host struct", zap.String("host", host), zap.Error(err))
-				return
-			}
-
-			b := &dnsmessage.AResource{}
-			copy(b.A[:], host)
-			msg.Answers = append(msg.Answers, dnsmessage.Resource{
-				Header: dnsmessage.ResourceHeader{
-					Name:  h,
-					Type:  dnsmessage.TypeA,
-					Class: dnsmessage.ClassINET,
-				},
-				Body: b,
-			})
-		}
-
-		msg.ID = header.ID
-		if err := d.write(conn, addr, msg); err != nil {
-			d.log.Error("failed write packet", zap.Error(err))
-		}
-
-		return
-	}
-
-	c, ok := d.cache.Get(unow, name, qType)
-	if ok {
-		go d.log.Info("use cache",
-			zap.String("type", qType.String()),
-			zap.String("name", name.String()),
-		)
-
-		c.Response.ID = header.ID
-		for i := range c.Response.Answers {
-			c.Response.Answers[i].Header.TTL = uint32(c.TimeToDie - unow)
-		}
-		if err := d.write(conn, addr, c.Response); err != nil {
-			d.log.Error(err.Error())
-		}
-		return
-	}
-
-	go d.log.Info("request",
-		zap.String("type", qType.String()),
-		zap.String("name", name.String()),
-	)
-
 	dnsRes, err := d.resolve(name, qType)
 	if err != nil {
 		d.log.Error(err.Error())
@@ -255,12 +262,6 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 	}
 
 	dnsRes.ID = header.ID
-
-	if fallbackAny {
-		for i := range dnsRes.Questions {
-			dnsRes.Questions[i].Type = dnsmessage.TypeALL
-		}
-	}
 
 	if err := d.write(conn, addr, dnsRes); err != nil {
 		d.log.Error(err.Error())
@@ -275,14 +276,6 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 		return
 	}
 
-	err = d.cache.Set(name, qType, AnswerCache{
-		Response:  dnsRes,
-		TimeToDie: unow + int64(d.minTTL(dnsRes)),
-	})
-	if err != nil {
-		d.log.Warn(err.Error())
-		return
-	}
 }
 
 func (d *SimpleDNS) minTTL(dns *dnsmessage.Message) uint32 {
