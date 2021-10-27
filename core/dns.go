@@ -213,7 +213,7 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 	}
 
 	if err := d.write(conn, addr, dnsRes); err != nil {
-		d.log.Error(err.Error())
+		d.log.Error("failed write packet", zap.Error(err))
 		return
 	}
 
