@@ -153,7 +153,7 @@ func (d *SimpleDNS) resolve(name *dnsmessage.Name, t *dnsmessage.Type) (*dnsmess
 	)
 
 	// as a reference https://github.com/coredns/coredns/blob/e0110264cce4d7cd4b8a5aee9a547646ee9742e5/plugin/forward/forward.go#L100
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(2 * time.Second)
 
 	for try := 1; time.Now().Before(deadline) && try <= len(d.Server); try++ {
 		m := &dns.Msg{}
