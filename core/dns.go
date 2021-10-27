@@ -111,15 +111,10 @@ func (d *SimpleDNS) Run() error {
 
 var ErrServerUnReached = errors.New("name servers all unreached")
 
-func (d *SimpleDNS) resolve(name *dnsmessage.Name, t *dnsmessage.Type) (*dnsmessage.Message, error) {
+func (d *SimpleDNS) resolve(msg *dnsmessage.Message) (*dnsmessage.Message, error) {
 
-	// RFC8482 4.3
-	var fallbackAny bool
-	if *t == dnsmessage.TypeALL {
-		*t = dnsmessage.TypeA
-		fallbackAny = true
-	}
-
+	t := &msg.Questions[0].Type
+	name := &msg.Questions[0].Name
 	if hosts, ok := d.staticHost[name.String()[:(len(name.String())-1)]]; ok {
 		msg := &dnsmessage.Message{
 			Header: dnsmessage.Header{
@@ -144,6 +139,7 @@ func (d *SimpleDNS) resolve(name *dnsmessage.Name, t *dnsmessage.Type) (*dnsmess
 		for i := range c.Response.Answers {
 			c.Response.Answers[i].Header.TTL = uint32(c.TimeToDie - unow)
 		}
+		c.Response.Header.ID = msg.ID
 		return c.Response, nil
 	}
 
@@ -157,7 +153,11 @@ func (d *SimpleDNS) resolve(name *dnsmessage.Name, t *dnsmessage.Type) (*dnsmess
 
 	for try := 1; time.Now().Before(deadline) && try <= len(d.Server); try++ {
 		m := &dns.Msg{}
-		m.SetQuestion(name.String(), uint16(*t))
+		m.Id = msg.ID
+		m.RecursionDesired = true
+		m.Question = make([]dns.Question, 1)
+		m.Question[0] = dns.Question{Name: name.String(), Qtype: uint16(*t), Qclass: dns.ClassINET}
+
 		c := dns.Client{
 			Timeout:      time.Second,
 			DialTimeout:  time.Second,
@@ -183,12 +183,6 @@ func (d *SimpleDNS) resolve(name *dnsmessage.Name, t *dnsmessage.Type) (*dnsmess
 			continue
 		}
 
-		// todo move upstream layer
-		if fallbackAny {
-			for i := range res.Questions {
-				res.Questions[i].Type = dnsmessage.TypeALL
-			}
-		}
 		err = d.cache.Set(name, t, AnswerCache{
 			Response:  &res,
 			TimeToDie: unow + int64(d.minTTL(&res)),
@@ -206,48 +200,17 @@ func (d *SimpleDNS) resolve(name *dnsmessage.Name, t *dnsmessage.Type) (*dnsmess
 
 func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr, buffer []byte) {
 
-	var p dnsmessage.Parser
-	header, err := p.Start(buffer[:length])
+	m := dnsmessage.Message{}
+	if err := m.Unpack(buffer[:length]); err != nil {
+		d.log.Error("failed decode packet", zap.Error(err))
+		return
+	}
 
+	dnsRes, err := d.resolve(&m)
 	if err != nil {
-		d.log.Error("failed decode packet", zap.Error(err), zap.Binary("raw", buffer))
+		d.log.Error("failed resolve host", zap.Error(err))
 		return
 	}
-
-	var name *dnsmessage.Name
-	var qType *dnsmessage.Type
-	for {
-		q, err := p.Question()
-		if err == dnsmessage.ErrSectionDone {
-			break
-		}
-		if err != nil {
-			d.log.Error("failed decode packet", zap.Error(err))
-			break
-		}
-
-		name = &q.Name
-		qType = &q.Type
-		break
-	}
-
-	// todo move resolve
-	// validate invalid query
-	if name == nil || qType == nil {
-		m := &dnsmessage.Message{}
-		m.ID = header.ID
-
-		_ = d.write(conn, addr, m)
-		return
-	}
-
-	dnsRes, err := d.resolve(name, qType)
-	if err != nil {
-		d.log.Error(err.Error())
-		return
-	}
-
-	dnsRes.ID = header.ID
 
 	if err := d.write(conn, addr, dnsRes); err != nil {
 		d.log.Error(err.Error())
@@ -256,8 +219,8 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr
 
 	if len(dnsRes.Answers) == 0 {
 		go d.log.Warn("answer is empty",
-			zap.String("type", qType.String()),
-			zap.String("name", name.String()),
+			zap.String("type", m.Questions[0].Type.String()),
+			zap.String("name", m.Questions[0].Name.String()),
 		)
 		return
 	}
