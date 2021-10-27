@@ -152,69 +152,55 @@ func (d *SimpleDNS) resolve(name *dnsmessage.Name, t *dnsmessage.Type) (*dnsmess
 		zap.String("name", name.String()),
 	)
 
-	m := &dns.Msg{}
-	m.SetQuestion(name.String(), uint16(*t))
+	// as a reference https://github.com/coredns/coredns/blob/e0110264cce4d7cd4b8a5aee9a547646ee9742e5/plugin/forward/forward.go#L100
+	deadline := time.Now().Add(20 * time.Second)
 
-	c := dns.Client{}
-
-	// TODO: refactor retry logic
-	for attempt, server := range d.Server {
-		ch := make(chan *dnsmessage.Message, 1)
-		go func() {
-			r, _, err := c.Exchange(m, server.String())
-			if err != nil {
-				d.log.Warn(err.Error())
-				ch <- nil
-				return
-			}
-
-			rr, err := r.Pack()
-			if err != nil {
-				d.log.Warn(err.Error())
-				ch <- nil
-				return
-			}
-
-			res := dnsmessage.Message{}
-			err = res.Unpack(rr)
-			if err != nil {
-				d.log.Warn(err.Error())
-				ch <- nil
-				return
-			}
-			ch <- &res
-		}()
-
-		select {
-		case m := <-ch:
-			if m != nil {
-				if fallbackAny {
-					for i := range m.Questions {
-						m.Questions[i].Type = dnsmessage.TypeALL
-					}
-				}
-				err := d.cache.Set(name, t, AnswerCache{
-					Response:  m,
-					TimeToDie: unow + int64(d.minTTL(m)),
-				})
-				if err != nil {
-					d.log.Warn(err.Error())
-				}
-
-				return m, nil
-			}
-
+	for try := 1; time.Now().Before(deadline) && try <= len(d.Server); try++ {
+		m := &dns.Msg{}
+		m.SetQuestion(name.String(), uint16(*t))
+		c := dns.Client{
+			Timeout:      time.Second,
+			DialTimeout:  time.Second,
+			ReadTimeout:  time.Second,
+			WriteTimeout: time.Second,
+		}
+		r, _, err := c.Exchange(m, d.Server[try-1].String())
+		if err != nil {
+			d.log.Error("failed connect upstream server", zap.Error(err))
 			continue
-		case <-time.After(1 * time.Second):
-			if attempt > 0 {
-				return nil, ErrServerUnReached
-			}
-			d.log.Error("retry switching secondary name server")
 		}
 
+		rr, err := r.Pack()
+		if err != nil {
+			d.log.Error("failed pack upstream packet", zap.Error(err))
+			continue
+		}
+
+		res := dnsmessage.Message{}
+		err = res.Unpack(rr)
+		if err != nil {
+			d.log.Error("failed unpack upstream packet", zap.Error(err))
+			continue
+		}
+
+		// todo move upstream layer
+		if fallbackAny {
+			for i := range res.Questions {
+				res.Questions[i].Type = dnsmessage.TypeALL
+			}
+		}
+		err = d.cache.Set(name, t, AnswerCache{
+			Response:  &res,
+			TimeToDie: unow + int64(d.minTTL(&res)),
+		})
+
+		if err != nil {
+			d.log.Error("failed put cache", zap.Error(err))
+		}
+
+		return &res, nil
 	}
 
-	// this is unreached
 	return nil, ErrServerUnReached
 }
 
