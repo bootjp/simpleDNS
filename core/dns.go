@@ -111,10 +111,10 @@ func (d *SimpleDNS) Run() error {
 
 var ErrServerUnReached = errors.New("name servers all unreached")
 
-func (d *SimpleDNS) resolve(msg *dnsmessage.Message) (*dnsmessage.Message, error) {
+func (d *SimpleDNS) resolveStatic(m *dnsmessage.Message) (*dnsmessage.Message, bool) {
 
-	t := &msg.Questions[0].Type
-	name := &msg.Questions[0].Name
+	name := m.Questions[0].Name
+
 	if hosts, ok := d.staticHost[name.String()[:(len(name.String())-1)]]; ok {
 		msg := &dnsmessage.Message{
 			Header: dnsmessage.Header{
@@ -125,8 +125,23 @@ func (d *SimpleDNS) resolve(msg *dnsmessage.Message) (*dnsmessage.Message, error
 		}
 
 		msg.Answers = hosts
+		msg.ID = m.ID
 
-		return msg, nil
+		return msg, true
+	}
+
+	return nil, false
+}
+
+func (d *SimpleDNS) resolve(msg *dnsmessage.Message) (*dnsmessage.Message, error) {
+
+	t := &msg.Questions[0].Type
+	name := &msg.Questions[0].Name
+
+	if d.Config.UseHosts {
+		if res, ok := d.resolveStatic(msg); ok {
+			return res, nil
+		}
 	}
 
 	unow := time.Now().Unix()
