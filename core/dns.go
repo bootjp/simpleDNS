@@ -62,15 +62,16 @@ func (d *SimpleDNS) Run() error {
 			return err
 		}
 
-		for s, strings := range hostsMap {
+		for ip, strings := range hostsMap {
 			for _, hostname := range strings {
 
 				b := &dnsmessage.AResource{}
-				copy(b.A[:], s)
+				copy(b.A[:], ip)
 
 				h, err := dnsmessage.NewName(hostname + ".")
 				if err != nil {
-					d.log.Error("failed create hosts record", zap.Error(err))
+					d.log.Error("failed create hosts record. skipped ", zap.Error(err), zap.String("target", hostname))
+					continue
 				}
 
 				ans := dnsmessage.Resource{
