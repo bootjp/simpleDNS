@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"net"
+	"sync"
 	"time"
 
 	"go.uber.org/zap/zapcore"
@@ -55,6 +56,10 @@ type SimpleDNSServer interface {
 
 const DnsUdpMaxPacketSize = 576
 
+var bufferPool = sync.Pool{
+	New: func() interface{} { return make([]byte, DnsUdpMaxPacketSize) },
+}
+
 func (d *SimpleDNS) Run() error {
 	if d.Config.UseHosts {
 		hostsMap, err := hostsfile.ParseHosts(hostsfile.ReadHostsFile())
@@ -99,14 +104,14 @@ func (d *SimpleDNS) Run() error {
 		_ = d.log.Sync()
 	}()
 
-	buffer := make([]byte, DnsUdpMaxPacketSize)
 	for {
-		length, addr, err := conn.ReadFrom(buffer)
+		buffer := bufferPool.Get().([]byte)
+		length, addr, err := conn.ReadFrom(buffer[0:])
 		if err != nil {
 			d.log.Error(err.Error())
 			continue
 		}
-		go d.handleRequest(conn, length, addr, buffer)
+		go d.handleRequest(conn, addr, buffer, length)
 	}
 }
 
@@ -214,11 +219,14 @@ func (d *SimpleDNS) resolve(msg *dnsmessage.Message) (*dnsmessage.Message, error
 	return nil, ErrServerUnReached
 }
 
-func (d *SimpleDNS) handleRequest(conn net.PacketConn, length int, addr net.Addr, buffer []byte) {
-
+func (d *SimpleDNS) handleRequest(conn net.PacketConn, addr net.Addr, buffer []byte, length int) {
+	defer func() {
+		buffer = buffer[0:cap(buffer)]
+		bufferPool.Put(buffer)
+	}()
 	m := dnsmessage.Message{}
 	if err := m.Unpack(buffer[:length]); err != nil {
-		d.log.Error("failed decode packet", zap.Error(err))
+		d.log.Error("failed decode packet", zap.Error(err), zap.Binary("raw", buffer[:length]))
 		return
 	}
 
