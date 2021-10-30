@@ -52,7 +52,7 @@ type SimpleDNSServer interface {
 	Run() error
 }
 
-const DnsUdpMaxPacketSize = 576
+const DnsUdpMaxPacketSize = 4096
 
 var bufferPool = sync.Pool{
 	New: func() interface{} { return make([]byte, DnsUdpMaxPacketSize) },
@@ -168,7 +168,7 @@ func (d *SimpleDNS) resolve(msg *dnsmessage.Message) (*dnsmessage.Message, error
 	)
 
 	// as a reference https://github.com/coredns/coredns/blob/e0110264cce4d7cd4b8a5aee9a547646ee9742e5/plugin/forward/forward.go#L100
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 
 	for try := 1; time.Now().Before(deadline) && try <= len(d.Server); try++ {
 
@@ -178,7 +178,7 @@ func (d *SimpleDNS) resolve(msg *dnsmessage.Message) (*dnsmessage.Message, error
 			continue
 		}
 
-		timeout := time.Now().Add(time.Second)
+		timeout := time.Now().Add(time.Second * 2)
 		err = conn.SetDeadline(timeout)
 		if err != nil {
 			d.log.Error("set deadline", zap.Error(err))
@@ -198,6 +198,7 @@ func (d *SimpleDNS) resolve(msg *dnsmessage.Message) (*dnsmessage.Message, error
 		buf, err := msg.Pack()
 		if err != nil {
 			d.log.Error("failed pack", zap.Error(err))
+			continue
 		}
 
 		_, err = conn.Write(buf)
@@ -217,9 +218,12 @@ func (d *SimpleDNS) resolve(msg *dnsmessage.Message) (*dnsmessage.Message, error
 		res := dnsmessage.Message{}
 		err = res.Unpack(buffer)
 		if err != nil {
+			bufferPool.Put(buffer[0:cap(buffer)])
 			d.log.Error("failed unpack upstream packet", zap.Error(err))
 			continue
 		}
+
+		bufferPool.Put(buffer[0:cap(buffer)])
 
 		err = d.cache.Set(name, t, AnswerCache{
 			Response:  &res,
@@ -229,8 +233,6 @@ func (d *SimpleDNS) resolve(msg *dnsmessage.Message) (*dnsmessage.Message, error
 		if err != nil {
 			d.log.Error("failed put cache", zap.Error(err))
 		}
-
-		bufferPool.Put(buffer[0:cap(buffer)])
 
 		return &res, nil
 	}
