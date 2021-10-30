@@ -14,8 +14,6 @@ import (
 	"github.com/jaytaylor/go-hostsfile"
 
 	"golang.org/x/net/dns/dnsmessage"
-
-	"github.com/miekg/dns"
 )
 
 type SimpleDNS struct {
@@ -173,32 +171,51 @@ func (d *SimpleDNS) resolve(msg *dnsmessage.Message) (*dnsmessage.Message, error
 	deadline := time.Now().Add(2 * time.Second)
 
 	for try := 1; time.Now().Before(deadline) && try <= len(d.Server); try++ {
-		m := &dns.Msg{}
-		m.Id = msg.ID
-		m.RecursionDesired = true
-		m.Question = make([]dns.Question, 1)
-		m.Question[0] = dns.Question{Name: name.String(), Qtype: uint16(*t), Qclass: dns.ClassINET}
 
-		c := dns.Client{
-			Timeout:      time.Second,
-			DialTimeout:  time.Second,
-			ReadTimeout:  time.Second,
-			WriteTimeout: time.Second,
-		}
-		r, _, err := c.Exchange(m, d.Server[try-1].String())
+		conn, err := net.Dial("udp", d.Server[try-1].String())
 		if err != nil {
-			d.log.Error("failed connect upstream server", zap.Error(err))
+			d.log.Error("failed connect server", zap.Error(err))
 			continue
 		}
 
-		rr, err := r.Pack()
+		timeout := time.Now().Add(time.Second)
+		err = conn.SetDeadline(timeout)
+		if err != nil {
+			d.log.Error("set deadline", zap.Error(err))
+			continue
+		}
+		err = conn.SetReadDeadline(timeout)
+		if err != nil {
+			d.log.Error("set deadline", zap.Error(err))
+			continue
+		}
+		err = conn.SetWriteDeadline(timeout)
+		if err != nil {
+			d.log.Error("set deadline", zap.Error(err))
+			continue
+		}
+
+		buf, err := msg.Pack()
+		if err != nil {
+			d.log.Error("failed pack", zap.Error(err))
+		}
+
+		_, err = conn.Write(buf)
+		if err != nil {
+			d.log.Error("failed read packet", zap.Error(err))
+			continue
+		}
+
+		buffer := bufferPool.Get().([]byte)
+		_, err = conn.Read(buffer)
+
 		if err != nil {
 			d.log.Error("failed pack upstream packet", zap.Error(err))
 			continue
 		}
 
 		res := dnsmessage.Message{}
-		err = res.Unpack(rr)
+		err = res.Unpack(buffer)
 		if err != nil {
 			d.log.Error("failed unpack upstream packet", zap.Error(err))
 			continue
@@ -213,6 +230,8 @@ func (d *SimpleDNS) resolve(msg *dnsmessage.Message) (*dnsmessage.Message, error
 			d.log.Error("failed put cache", zap.Error(err))
 		}
 
+		bufferPool.Put(buffer[0:cap(buffer)])
+
 		return &res, nil
 	}
 
@@ -226,7 +245,7 @@ func (d *SimpleDNS) handleRequest(conn net.PacketConn, addr net.Addr, buffer []b
 	}()
 	m := dnsmessage.Message{}
 	if err := m.Unpack(buffer[:length]); err != nil {
-		d.log.Error("failed decode packet", zap.Error(err), zap.Binary("raw", buffer[:length]))
+		d.log.Error("failed decode packet", zap.Error(err), zap.Binary("raw", buffer[0:]))
 		return
 	}
 
