@@ -8,5 +8,5 @@ name_server:
     port: 53
   - ip: 1.1.1.1
     port: 53
-log_level: 0
+log_level: INFO
 use_hosts: true

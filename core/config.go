@@ -19,12 +19,19 @@ const (
 )
 
 type Config struct {
-	ListenAddr   *net.UDPAddr   `yaml:"listen_addr"`
-	MaxCacheSize int            `yaml:"max_cache_size"`
-	NameServer   [2]*NameServer `yaml:"name_server"`
-	Hosts        []*Host        `yaml:"hosts"`
-	LogLevel     LogLevel       `yaml:"log_level"`
-	UseHosts     bool           `yaml:"use_hosts"`
+	ListenAddr    *net.UDPAddr   `yaml:"listen_addr"`
+	MaxCacheSize  int            `yaml:"max_cache_size"`
+	NameServer    [2]*NameServer `yaml:"name_server"`
+	Hosts         []*Host        `yaml:"hosts"`
+	LogLevel      LogLevel
+	LogLevelPlain string `yaml:"log_level"`
+	UseHosts      bool   `yaml:"use_hosts"`
+}
+
+var logLevelMap = map[string]LogLevel{
+	"DEBUG": LoglevelDebug,
+	"INFO":  LogLevelInfo,
+	"ERROR": LogLevelError,
 }
 
 func LoadConfig(file ...*os.File) (*Config, error) {
@@ -47,10 +54,16 @@ func ParseConfigByFile(file *os.File) (*Config, error) {
 		return nil, err
 	}
 
-	c := Config{}
+	c := Config{
+		LogLevel: LogLevelError,
+	}
 	err = yaml.Unmarshal(b, &c)
 	if err != nil {
 		return nil, err
+	}
+
+	if lv, ok := logLevelMap[c.LogLevelPlain]; ok {
+		c.LogLevel = lv
 	}
 
 	return &c, err
