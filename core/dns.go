@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,10 +20,13 @@ import (
 type SimpleDNS struct {
 	ListenAddr *net.UDPAddr
 	Server     [2]*NameServer
-	log        *zap.Logger
-	cache      *CacheRepository
 	Config     *Config
-	staticHost map[string][]dnsmessage.Resource
+
+	log          *zap.Logger
+	cache        *CacheRepository
+	staticHostV4 map[string][]dnsmessage.Resource
+	staticHostV6 map[string][]dnsmessage.Resource
+	bufferPool   sync.Pool
 }
 
 func NewSimpleDNSServer(c *Config) (SimpleDNSServer, error) {
@@ -41,10 +45,14 @@ func NewSimpleDNSServer(c *Config) (SimpleDNSServer, error) {
 	return &SimpleDNS{
 		ListenAddr: c.ListenAddr,
 		Server:     c.NameServer,
-		log:        logger,
-		cache:      cr,
 		Config:     c,
-		staticHost: map[string][]dnsmessage.Resource{},
+
+		log:          logger,
+		cache:        cr,
+		staticHostV4: map[string][]dnsmessage.Resource{},
+		bufferPool: sync.Pool{
+			New: func() interface{} { return make([]byte, DnsUdpMaxPacketSize) },
+		},
 	}, nil
 }
 
@@ -54,10 +62,6 @@ type SimpleDNSServer interface {
 
 const DnsUdpMaxPacketSize = 4096
 
-var bufferPool = sync.Pool{
-	New: func() interface{} { return make([]byte, DnsUdpMaxPacketSize) },
-}
-
 func (d *SimpleDNS) Run() error {
 	if d.Config.UseHosts {
 		hostsMap, err := hostsfile.ParseHosts(hostsfile.ReadHostsFile())
@@ -65,8 +69,8 @@ func (d *SimpleDNS) Run() error {
 			return err
 		}
 
-		for ip, strings := range hostsMap {
-			for _, hostname := range strings {
+		for ip, hosts := range hostsMap {
+			for _, hostname := range hosts {
 
 				b := &dnsmessage.AResource{}
 				copy(b.A[:], ip)
@@ -86,7 +90,12 @@ func (d *SimpleDNS) Run() error {
 					Body: b,
 				}
 
-				d.staticHost[hostname] = append(d.staticHost[hostname], ans)
+				switch d.checkIPVersion(ip) {
+				case 4:
+					d.staticHostV4[hostname] = append(d.staticHostV4[hostname], ans)
+				case 6:
+					d.staticHostV6[hostname] = append(d.staticHostV6[hostname], ans)
+				}
 			}
 		}
 	}
@@ -103,7 +112,7 @@ func (d *SimpleDNS) Run() error {
 	}()
 
 	for {
-		buffer := bufferPool.Get().([]byte)
+		buffer := d.bufferPool.Get().([]byte)
 		length, addr, err := conn.ReadFrom(buffer[0:])
 		if err != nil {
 			d.log.Error(err.Error())
@@ -113,25 +122,62 @@ func (d *SimpleDNS) Run() error {
 	}
 }
 
+// by https://github.com/golang/go/blob/8e3d5f0bb324eebb92cc93264a63afa7ded9ab9a/src/net/ip.go#L704
+func (d *SimpleDNS) checkIPVersion(addr string) int {
+	for i := 0; i < len(addr); i++ {
+		switch addr[i] {
+		case '.':
+			return 4
+		case ':':
+			return 6
+		}
+	}
+
+	return 0
+}
+
 var ErrServerUnReached = errors.New("name servers all unreached")
 
 func (d *SimpleDNS) resolveStatic(m *dnsmessage.Message) (*dnsmessage.Message, bool) {
 
 	name := m.Questions[0].Name
 
-	if hosts, ok := d.staticHost[name.String()[:(len(name.String())-1)]]; ok {
-		msg := &dnsmessage.Message{
-			Header: dnsmessage.Header{
-				Response:      true,
-				Authoritative: true,
-				RCode:         dnsmessage.RCodeSuccess,
-			},
+	plainName := name.String()
+	if strings.HasSuffix(plainName, ".") {
+		plainName = plainName[:(len(plainName) - 1)]
+	}
+
+	switch m.Questions[0].Type {
+	case dnsmessage.TypeA:
+		if hosts, ok := d.staticHostV4[plainName]; ok {
+			msg := &dnsmessage.Message{
+				Header: dnsmessage.Header{
+					Response:      true,
+					Authoritative: true,
+					RCode:         dnsmessage.RCodeSuccess,
+				},
+			}
+
+			msg.Answers = hosts
+			msg.ID = m.ID
+
+			return msg, true
 		}
+	case dnsmessage.TypeAAAA:
+		if hosts, ok := d.staticHostV6[plainName]; ok {
+			msg := &dnsmessage.Message{
+				Header: dnsmessage.Header{
+					Response:      true,
+					Authoritative: true,
+					RCode:         dnsmessage.RCodeSuccess,
+				},
+			}
 
-		msg.Answers = hosts
-		msg.ID = m.ID
+			msg.Answers = hosts
+			msg.ID = m.ID
 
-		return msg, true
+			return msg, true
+		}
 	}
 
 	return nil, false
@@ -207,7 +253,7 @@ func (d *SimpleDNS) resolve(msg *dnsmessage.Message) (*dnsmessage.Message, error
 			continue
 		}
 
-		buffer := bufferPool.Get().([]byte)
+		buffer := d.bufferPool.Get().([]byte)
 		_, err = conn.Read(buffer)
 
 		if err != nil {
@@ -218,12 +264,12 @@ func (d *SimpleDNS) resolve(msg *dnsmessage.Message) (*dnsmessage.Message, error
 		res := dnsmessage.Message{}
 		err = res.Unpack(buffer)
 		if err != nil {
-			bufferPool.Put(buffer[0:cap(buffer)])
+			d.bufferPool.Put(buffer[0:cap(buffer)])
 			d.log.Error("failed unpack upstream packet", zap.Error(err))
 			continue
 		}
 
-		bufferPool.Put(buffer[0:cap(buffer)])
+		d.bufferPool.Put(buffer[0:cap(buffer)])
 
 		err = d.cache.Set(name, t, AnswerCache{
 			Response:  &res,
@@ -243,8 +289,9 @@ func (d *SimpleDNS) resolve(msg *dnsmessage.Message) (*dnsmessage.Message, error
 func (d *SimpleDNS) handleRequest(conn net.PacketConn, addr net.Addr, buffer []byte, length int) {
 	defer func() {
 		buffer = buffer[0:cap(buffer)]
-		bufferPool.Put(buffer)
+		d.bufferPool.Put(buffer)
 	}()
+
 	m := dnsmessage.Message{}
 	if err := m.Unpack(buffer[:length]); err != nil {
 		d.log.Error("failed decode packet", zap.Error(err), zap.Binary("raw", buffer[0:]))
