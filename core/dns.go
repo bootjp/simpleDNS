@@ -69,8 +69,14 @@ func (d *SimpleDNS) Run() error {
 			return err
 		}
 
-		for ip, hosts := range hostsMap {
+		for ipPlain, hosts := range hostsMap {
 			for _, hostname := range hosts {
+
+				ip := net.ParseIP(ipPlain).To4()
+				if ip == nil {
+					d.log.Error("failed convert ipPlain")
+					continue
+				}
 
 				b := &dnsmessage.AResource{}
 				copy(b.A[:], ip)
@@ -90,7 +96,7 @@ func (d *SimpleDNS) Run() error {
 					Body: b,
 				}
 
-				switch d.checkIPVersion(ip) {
+				switch d.checkIPVersion(ipPlain) {
 				case 4:
 					d.staticHostV4[hostname] = append(d.staticHostV4[hostname], ans)
 				case 6:
