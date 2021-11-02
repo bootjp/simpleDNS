@@ -158,9 +158,12 @@ func (d *SimpleDNS) resolveStatic(m *dnsmessage.Message) (*dnsmessage.Message, b
 		if hosts, ok := d.staticHostV4[plainName]; ok {
 			msg := &dnsmessage.Message{
 				Header: dnsmessage.Header{
-					Response:      true,
-					Authoritative: true,
-					RCode:         dnsmessage.RCodeSuccess,
+					Response:           true,
+					Authoritative:      false,
+					OpCode:             0,
+					RCode:              dnsmessage.RCodeSuccess,
+					RecursionAvailable: true,
+					RecursionDesired:   true,
 				},
 			}
 
@@ -173,9 +176,12 @@ func (d *SimpleDNS) resolveStatic(m *dnsmessage.Message) (*dnsmessage.Message, b
 		if hosts, ok := d.staticHostV6[plainName]; ok {
 			msg := &dnsmessage.Message{
 				Header: dnsmessage.Header{
-					Response:      true,
-					Authoritative: true,
-					RCode:         dnsmessage.RCodeSuccess,
+					Response:           true,
+					Authoritative:      false,
+					OpCode:             0,
+					RCode:              dnsmessage.RCodeSuccess,
+					RecursionAvailable: true,
+					RecursionDesired:   true,
 				},
 			}
 
