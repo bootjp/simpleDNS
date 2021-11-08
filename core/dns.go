@@ -50,6 +50,7 @@ func NewSimpleDNSServer(c *Config) (SimpleDNSServer, error) {
 		log:          logger,
 		cache:        cr,
 		staticHostV4: map[string][]dnsmessage.Resource{},
+		staticHostV6: map[string][]dnsmessage.Resource{},
 		bufferPool: sync.Pool{
 			New: func() interface{} { return make([]byte, DnsUdpMaxPacketSize) },
 		},
