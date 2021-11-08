@@ -74,6 +74,16 @@ func (c *CacheRepository) Get(unow int64, name *dnsmessage.Name, t *dnsmessage.T
 }
 
 func (c *CacheRepository) Set(name *dnsmessage.Name, t *dnsmessage.Type, dns AnswerCache) error {
+	add := make([]dnsmessage.Resource, len(dns.Response.Additionals))
+	i := 0
+	for _, additional := range dns.Response.Additionals {
+		if additional.Header.Type == dnsmessage.TypeOPT {
+			continue
+		}
+		add[i] = additional
+		i++
+	}
+	dns.Response.Additionals = add[:i]
 	_ = c.items.Add(c.key(name, t), dns)
 	return nil
 }
