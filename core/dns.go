@@ -75,7 +75,7 @@ func (d *SimpleDNS) Run() error {
 
 				ip := net.ParseIP(ipPlain).To4()
 				if ip == nil {
-					d.log.Error("failed convert ipPlain")
+					d.log.Error("failed convert ip plain", zap.String("ip", ipPlain))
 					continue
 				}
 
