@@ -7,7 +7,7 @@ require (
 	github.com/jaytaylor/go-hostsfile v0.0.0-20201026230151-f581673a59cf
 	go.uber.org/zap v1.19.1
 	golang.org/x/net v0.0.0-20211015210444-4f30a5c0130f
-	gopkg.in/yaml.v2 v2.2.8
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (
