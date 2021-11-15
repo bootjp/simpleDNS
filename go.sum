@@ -7,6 +7,8 @@ github.com/hashicorp/golang-lru v0.5.4 h1:YDjusn29QI/Das2iO9M0BHnIbxPeyuCHsjMW+l
 github.com/hashicorp/golang-lru v0.5.4/go.mod h1:iADmTwqILo4mZ8BN3D2Q6+9jd8WM5uGBxy+E8yxSoD4=
 github.com/jaytaylor/go-hostsfile v0.0.0-20201026230151-f581673a59cf h1:GxvlbpND05xdvL3ZJOtufOtUKYM7IQh3LN99fz74sLE=
 github.com/jaytaylor/go-hostsfile v0.0.0-20201026230151-f581673a59cf/go.mod h1:ANWA9RN/851H77KWOsy4W0XD8JKZddOiF+sUNvLkTvM=
+github.com/jaytaylor/go-hostsfile v0.0.0-20211101162325-59e7508e09b9 h1:g4BuEt1rUSDh8UI0suj2C7MqVIBx99nxcueNsoz8li4=
+github.com/jaytaylor/go-hostsfile v0.0.0-20211101162325-59e7508e09b9/go.mod h1:ANWA9RN/851H77KWOsy4W0XD8JKZddOiF+sUNvLkTvM=
 github.com/kr/pretty v0.1.0 h1:L/CwN0zerZDmRFUapSPitk6f+Q3+0za1rQkzVuMiMFI=
 github.com/kr/pretty v0.1.0/go.mod h1:dAy3ld7l9f0ibDNOQOHHMYYIIbhfbHSm3C4ZsoJORNo=
 github.com/kr/pty v1.1.1/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=
