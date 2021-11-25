@@ -9,6 +9,8 @@ github.com/jaytaylor/go-hostsfile v0.0.0-20201026230151-f581673a59cf h1:GxvlbpND
 github.com/jaytaylor/go-hostsfile v0.0.0-20201026230151-f581673a59cf/go.mod h1:ANWA9RN/851H77KWOsy4W0XD8JKZddOiF+sUNvLkTvM=
 github.com/jaytaylor/go-hostsfile v0.0.0-20211101162325-59e7508e09b9 h1:g4BuEt1rUSDh8UI0suj2C7MqVIBx99nxcueNsoz8li4=
 github.com/jaytaylor/go-hostsfile v0.0.0-20211101162325-59e7508e09b9/go.mod h1:ANWA9RN/851H77KWOsy4W0XD8JKZddOiF+sUNvLkTvM=
+github.com/jaytaylor/go-hostsfile v0.0.0-20211120191712-f53f85d8b98f h1:desbPBVIVr08zLD8xiatWzHdkwG5CaqfoLFw/abN9D8=
+github.com/jaytaylor/go-hostsfile v0.0.0-20211120191712-f53f85d8b98f/go.mod h1:ANWA9RN/851H77KWOsy4W0XD8JKZddOiF+sUNvLkTvM=
 github.com/kr/pretty v0.1.0 h1:L/CwN0zerZDmRFUapSPitk6f+Q3+0za1rQkzVuMiMFI=
 github.com/kr/pretty v0.1.0/go.mod h1:dAy3ld7l9f0ibDNOQOHHMYYIIbhfbHSm3C4ZsoJORNo=
 github.com/kr/pty v1.1.1/go.mod h1:pFQYn66WHrOpPYNljwOMqo10TkYh1fy3cYio2l3bCsQ=
