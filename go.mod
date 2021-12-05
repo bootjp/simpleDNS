@@ -6,7 +6,7 @@ require (
 	github.com/hashicorp/golang-lru v0.5.4
 	github.com/jaytaylor/go-hostsfile v0.0.0-20211120191712-f53f85d8b98f
 	go.uber.org/zap v1.19.1
-	golang.org/x/net v0.0.0-20211203184738-4852103109b8
+	golang.org/x/net v0.0.0-20211205041911-012df41ee64c
 	gopkg.in/yaml.v2 v2.4.0
 )
 
