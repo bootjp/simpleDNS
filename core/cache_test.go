@@ -1,7 +1,6 @@
 package core
 
 import (
-	"log"
 	"os"
 	"testing"
 )
@@ -9,13 +8,13 @@ import (
 func TestLoglevel(t *testing.T) {
 	f, err := os.Open("../config.yaml")
 	if err != nil {
-		log.Fatalln(err)
+		t.Fatal(err)
 	}
 
 	conf, err := ParseConfigByFile(f)
 
 	if conf.LogLevel != LogLevelInfo {
-		log.Fatalln("miss match log level")
+		t.Fatal("miss match log level")
 	}
 
 }

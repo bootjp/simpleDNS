@@ -72,8 +72,7 @@ func (d *SimpleDNS) Run() error {
 
 		for ipPlain, hosts := range hostsMap {
 			for _, hostname := range hosts {
-
-				ip := net.ParseIP(ipPlain).To4()
+				ip := net.ParseIP(ipPlain).To16()
 				if ip == nil {
 					d.log.Error("failed convert ip plain", zap.String("ip", ipPlain))
 					continue
@@ -97,7 +96,7 @@ func (d *SimpleDNS) Run() error {
 					Body: b,
 				}
 
-				switch d.checkIPVersion(ipPlain) {
+				switch checkIPVersion(ipPlain) {
 				case 4:
 					d.staticHostV4[hostname] = append(d.staticHostV4[hostname], ans)
 				case 6:
@@ -130,7 +129,7 @@ func (d *SimpleDNS) Run() error {
 }
 
 // by https://github.com/golang/go/blob/8e3d5f0bb324eebb92cc93264a63afa7ded9ab9a/src/net/ip.go#L704
-func (d *SimpleDNS) checkIPVersion(addr string) int {
+func checkIPVersion(addr string) int {
 	for i := 0; i < len(addr); i++ {
 		switch addr[i] {
 		case '.':
