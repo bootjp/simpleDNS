@@ -1,4 +1,4 @@
-FROM golang:1.17 AS build
+FROM golang:1.18 AS build
 ENV GO111MODULE=on
 
 WORKDIR $GOPATH/src/bootjp/simple_dns
