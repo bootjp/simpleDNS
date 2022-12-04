@@ -5,7 +5,7 @@ go 1.19
 require (
 	github.com/hashicorp/golang-lru v0.6.0
 	github.com/jaytaylor/go-hostsfile v0.0.0-20220426042432-61485ac1fa6c
-	go.uber.org/zap v1.23.0
+	go.uber.org/zap v1.24.0
 	golang.org/x/net v0.2.0
 	gopkg.in/yaml.v2 v2.4.0
 )
