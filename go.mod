@@ -2,7 +2,7 @@ module github.com/bootjp/simple_dns
 
 go 1.25.0
 
-toolchain go1.25.5
+toolchain go1.27.1
 
 require (
 	github.com/hashicorp/golang-lru v1.0.2
